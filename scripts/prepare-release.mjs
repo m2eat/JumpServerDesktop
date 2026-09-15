@@ -60,8 +60,8 @@ const prefix = `${packageName}-${version}`;
 const requiredArtifacts = [
   ["Windows x64 NSIS installer", `${prefix}-win-x64.exe`],
   ["Windows x64 blockmap", `${prefix}-win-x64.exe.blockmap`],
-  ["Linux x64 AppImage", `${prefix}-linux-x64.AppImage`],
-  ["Linux x64 Debian package", `${prefix}-linux-x64.deb`],
+  ["Linux x64 AppImage", `${prefix}-linux-x86_64.AppImage`],
+  ["Linux x64 Debian package", `${prefix}-linux-amd64.deb`],
   ["macOS x64 disk image", `${prefix}-mac-x64.dmg`],
   ["macOS x64 update archive", `${prefix}-mac-x64.zip`],
   ["macOS x64 update archive blockmap", `${prefix}-mac-x64.zip.blockmap`],
@@ -89,7 +89,7 @@ for (const [, fileName] of requiredArtifacts) {
 
 const metadataRequirements = [
   ["latest.yml", [`${prefix}-win-x64.exe`]],
-  ["latest-linux.yml", [`${prefix}-linux-x64.AppImage`]],
+  ["latest-linux.yml", [`${prefix}-linux-x86_64.AppImage`]],
   ["latest-mac.yml", [`${prefix}-mac-x64.zip`, `${prefix}-mac-arm64.zip`]],
 ];
 
