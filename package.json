@@ -1,6 +1,6 @@
 {
   "name": "jumpserver-desktop",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "JumpServer community desktop workstation",
   "engines": {
     "node": ">=24.0.0"
