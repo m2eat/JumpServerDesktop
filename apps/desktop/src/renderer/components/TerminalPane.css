@@ -1,0 +1,220 @@
+.terminal-pane {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  height: 100%;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--text);
+  background: var(--terminal-background);
+}
+
+.terminal-pane button {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.terminal-pane button:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--shadow);
+}
+
+.terminal-pane button:disabled {
+  cursor: not-allowed;
+  opacity: .42;
+}
+
+.terminal-pane :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.terminal-toolbar {
+  position: absolute;
+  z-index: 8;
+  top: 8px;
+  right: 10px;
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--surface-2);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-3px);
+  transition: opacity 120ms ease, transform 120ms ease, border-color 120ms ease;
+}
+
+.terminal-pane:hover .terminal-toolbar,
+.terminal-pane:focus-within .terminal-toolbar {
+  border-color: var(--border-soft);
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.terminal-surface {
+  min-height: 0;
+  flex: 1;
+  padding: 7px 8px 4px 10px;
+  background: var(--terminal-background);
+}
+
+.terminal-surface .xterm,
+.terminal-surface .xterm-viewport {
+  height: 100%;
+}
+
+.terminal-surface .xterm-viewport {
+  background: var(--terminal-background);
+}
+
+.terminal-search {
+  position: absolute;
+  z-index: 9;
+  top: 9px;
+  right: 9px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 36px;
+  padding: 3px 4px 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--surface-2);
+}
+
+.terminal-search input {
+  width: 210px;
+  color: var(--text);
+  background: transparent;
+  font: 13px/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.terminal-search input::placeholder {
+  color: var(--dim);
+}
+
+.terminal-search small {
+  padding: 0 4px;
+  color: var(--danger);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.terminal-disconnected,
+.terminal-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  flex: 0 0 auto;
+  padding: 7px 11px;
+  border-top: 1px solid var(--warning-soft);
+  color: var(--warning);
+  background: var(--warning-soft);
+  font-size: 12px;
+}
+
+.terminal-error {
+  justify-content: space-between;
+  border-color: var(--danger-soft);
+  color: var(--danger-text);
+  background: var(--danger-soft);
+}
+
+.terminal-error button {
+  flex: 0 0 auto;
+}
+
+.terminal-modal-backdrop {
+  z-index: 80;
+  background: var(--overlay);
+}
+
+.terminal-paste-container {
+  width: 100%;
+  padding: 20px;
+}
+
+.terminal-paste {
+  box-sizing: border-box;
+  width: min(560px, 100%);
+  max-width: 560px;
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px;
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.terminal-paste > svg {
+  color: var(--warning);
+}
+
+.terminal-paste h3,
+.terminal-paste p {
+  margin: 0;
+}
+
+.terminal-paste h3 {
+  margin-top: 10px;
+  font-size: 15px;
+}
+
+.terminal-paste p {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.terminal-paste pre {
+  max-height: 260px;
+  overflow: auto;
+  margin: 14px 0 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  padding: 10px;
+  color: var(--text);
+  background: var(--terminal-background);
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.terminal-paste > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 14px;
+}
+
+.terminal-paste > div button {
+  display: inline-flex;
+  width: auto;
+  height: 32px;
+  align-items: center;
+  padding: 0 11px;
+  border-color: var(--border);
+  color: var(--text);
+  background: var(--raised);
+}
+
+.terminal-paste > div .terminal-paste-confirm {
+  border-color: transparent;
+  color: var(--text-on-accent);
+  background: var(--accent);
+}

@@ -1,0 +1,223 @@
+.new-tab-page {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 48px clamp(24px, 5vw, 80px) 64px;
+  color: var(--text);
+  background: var(--canvas);
+}
+
+.new-tab-page-content {
+  width: min(825px, 100%);
+  margin: 0 auto;
+}
+
+.new-tab-search {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--muted);
+  background: var(--surface-2);
+  box-shadow: 0 8px 22px var(--shadow);
+}
+
+.new-tab-search input {
+  min-width: 0;
+  flex: 1;
+  color: var(--text);
+  font: inherit;
+  background: transparent;
+}
+
+.new-tab-search input::placeholder {
+  color: var(--dim);
+}
+
+.new-tab-search-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  color: var(--dim);
+  font-size: 10px;
+}
+
+.new-tab-search-hint kbd {
+  padding: 2px 5px;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 1;
+  background: var(--hover);
+}
+
+.new-tab-recents {
+  overflow: hidden;
+  margin-top: 22px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 10px 26px var(--shadow);
+}
+
+.new-tab-recents-header {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.new-tab-recents-header h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.new-tab-recents-header span {
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.new-tab-recent-list {
+  padding: 7px;
+}
+
+.new-tab-recent-row {
+  display: grid;
+  width: 100%;
+  min-height: 50px;
+  grid-template-columns: 32px minmax(0, 1fr) minmax(132px, auto);
+  align-items: center;
+  gap: 11px;
+  padding: 8px 11px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--muted);
+  text-align: left;
+  font: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.new-tab-recent-row:hover {
+  background: var(--hover);
+}
+
+.new-tab-recent-row:focus-visible,
+.new-tab-recents-empty .new-tab-browse-host:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.new-tab-recent-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--hover);
+}
+
+.new-tab-recent-icon.is-terminal { color: var(--icon-terminal); background: var(--accent-soft); }
+.new-tab-recent-icon.is-files { color: var(--icon-files); background: var(--icon-files-soft); }
+.new-tab-recent-icon.is-database { color: var(--icon-database); background: var(--warning-soft); }
+.new-tab-recent-icon.is-remote { color: var(--icon-remote); background: var(--icon-remote-soft); }
+
+.new-tab-recent-name,
+.new-tab-recent-context {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.new-tab-recent-name strong,
+.new-tab-recent-context span,
+.new-tab-recent-context small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.new-tab-recent-name strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.new-tab-recent-context {
+  justify-items: end;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+}
+
+.new-tab-recent-context small {
+  color: var(--dim);
+  font-size: 10px;
+}
+
+.new-tab-recents-empty,
+.new-tab-recents-no-match {
+  padding: 20px 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.new-tab-recents-empty {
+  display: flex;
+  min-height: 88px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.new-tab-recents-empty p {
+  margin: 0;
+}
+
+.new-tab-recents-empty .new-tab-browse-host {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  background: var(--surface-2);
+  cursor: pointer;
+}
+
+.new-tab-recents-empty .new-tab-browse-host:hover {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+@media (max-width: 560px) {
+  .new-tab-page {
+    padding: 28px 16px 40px;
+  }
+
+  .new-tab-recent-row {
+    grid-template-columns: 32px minmax(0, 1fr);
+  }
+
+  .new-tab-recent-context {
+    display: none;
+  }
+}

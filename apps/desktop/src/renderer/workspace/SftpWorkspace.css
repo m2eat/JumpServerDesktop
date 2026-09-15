@@ -1,0 +1,66 @@
+.sftp-library-surface { width: 100%; height: 100%; min-height: 0; min-width: 0; }
+.sftp-workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); height: 100%; min-height: 0; min-width: 0; background: var(--canvas); }
+.sftp-endpoint { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; background: var(--canvas); }
+.sftp-workspace > .sftp-endpoint + .sftp-endpoint { border-left: 1px solid var(--border); }
+.sftp-endpoint-header { display: flex; align-items: center; min-height: 50px; flex-shrink: 0; gap: 12px; padding: 0 14px; background: var(--surface); }
+.sftp-endpoint .sftp-endpoint-trigger { display: flex; align-items: center; justify-content: flex-start; gap: 9px; max-width: 100%; min-height: 32px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text); font-size: 13px; }
+.sftp-endpoint .sftp-endpoint-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.sftp-endpoint-trigger > span:nth-child(2) { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sftp-endpoint-trigger > svg { flex-shrink: 0; color: var(--muted); }
+.sftp-endpoint-icon { display: grid; width: 29px; height: 29px; flex-shrink: 0; place-items: center; border-radius: 7px; background: var(--icon-command-soft); color: var(--icon-command); }
+.sftp-endpoint-icon.is-local { background: var(--icon-files-soft); }
+.sftp-endpoint-account { display: inline-flex; align-items: center; gap: 6px; min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; }
+.sftp-endpoint-account > i { width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: var(--warning); }
+.sftp-endpoint-account > i.is-active { background: var(--accent); }
+.sftp-endpoint-account > i.is-lost, .sftp-endpoint-account > i.is-failed { background: var(--danger); }
+.sftp-endpoint-menu { width: 232px; padding: 6px; border: 1px solid var(--border); border-radius: 10px; background: var(--raised); box-shadow: 0 12px 30px var(--shadow); }
+.sftp-endpoint-menu [role="menu"] { display: grid; gap: 3px; }
+.sftp-endpoint-menu [role="menuitem"] { display: flex; align-items: center; justify-content: flex-start; gap: 10px; width: 100%; min-height: 37px; padding: 0 10px; border: 0; border-radius: 6px; text-align: left; background: transparent; color: var(--text); font-size: 12px; }
+.sftp-endpoint-menu [role="menuitem"]:hover { background: var(--raised-hover); }
+.sftp-endpoint-menu small { margin-left: auto; color: var(--muted); font-size: 10px; }
+.sftp-local-surface, .sftp-remote-surface { flex: 1; min-height: 0; height: 100%; min-width: 0; }
+.sftp-connect-empty { display: flex; align-items: center; justify-content: center; flex-direction: column; flex: 1; min-height: 0; padding: 28px 25px 80px; text-align: center; }
+.sftp-empty-icon { display: grid; place-items: center; width: 70px; height: 70px; border: 1px solid var(--raised); border-radius: 18px; color: var(--text); background: linear-gradient(145deg, var(--raised), var(--surface)); }
+.sftp-connect-empty h2 { margin: 29px 0 12px; font-size: 21px; font-weight: 550; }
+.sftp-connect-empty p { max-width: 300px; margin: 0 0 25px; color: var(--muted); font-size: 14px; line-height: 1.75; white-space: pre-line; }
+.sftp-connect-empty > small { margin-top: 16px; color: var(--dim); font-size: 11px; }
+.sftp-connect-empty .app-action { min-height: 39px; padding: 0 19px; font-size: 13px; }
+.sftp-endpoint-error { position: relative; flex-shrink: 0; margin: 0; padding: 10px 16px; border-top: 1px solid var(--danger-border); color: var(--danger-text); background: var(--danger-soft); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.sftp-change-confirmation-backdrop { z-index: 80; background: var(--overlay); }
+.sftp-change-confirmation { width: min(440px, calc(100vw - 48px)); max-width: none; padding: 24px; }
+.sftp-change-confirmation h2 { margin: 0 0 15px; font-size: 19px; }
+.sftp-change-confirmation p { color: var(--muted); font-size: 13px; line-height: 1.7; }
+
+.sftp-change-confirmation {
+  box-sizing: border-box;
+  max-width: calc(100vw - 48px);
+}
+
+.sftp-change-confirmation p {
+  margin: 0;
+}
+
+.sftp-change-confirmation .modal-actions {
+  margin-top: 20px;
+}
+.terminal-workspace { display: grid; position: relative; grid-template-columns: minmax(0, 1fr); width: 100%; height: 100%; min-height: 0; min-width: 0; }
+.terminal-workspace.has-quick-sftp { grid-template-columns: minmax(0, 1fr) clamp(340px, 36%, 490px); }
+.terminal-workspace-console { min-height: 0; min-width: 0; overflow: hidden; }
+.quick-sftp-sidebar { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--border); background: var(--canvas); }
+.quick-sftp-title { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; min-height: 42px; padding: 0 11px 0 16px; border-bottom: 1px solid var(--border-soft); background: var(--surface); }
+.quick-sftp-title > span { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 12px; }
+.quick-sftp-sidebar > .sftp-endpoint { flex: 1; height: auto; }
+.sftp-endpoint.is-compact .sftp-endpoint-header { min-height: 44px; padding: 0 12px; }
+.sftp-endpoint.is-compact .sftp-connect-empty { padding-bottom: 40px; }
+.sftp-endpoint.is-compact .sftp-connect-empty h2 { font-size: 17px; }
+.sftp-endpoint.is-compact .sftp-connect-empty p { font-size: 12px; }
+.terminal-toolbar .terminal-sftp-button { display: inline-flex; width: auto; gap: 6px; padding: 0 9px; color: var(--muted); }
+.terminal-sftp-button span { font-size: 11px; }
+.terminal-toolbar .terminal-sftp-button[aria-expanded="true"] { background: var(--selected); color: var(--success); }
+.is-split .terminal-workspace.has-quick-sftp { grid-template-columns: minmax(0, 1fr); }
+.is-split .quick-sftp-sidebar:not(.is-inactive) { position: absolute; z-index: 10; inset: 0 0 0 auto; width: min(390px, 90%); box-shadow: -10px 0 30px var(--shadow); }
+
+.sftp-endpoint-menu,
+.is-split .quick-sftp-sidebar:not(.is-inactive) {
+  box-shadow: none;
+}

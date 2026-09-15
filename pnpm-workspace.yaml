@@ -1,0 +1,12 @@
+packages:
+  - apps/desktop
+  - packages/*
+allowBuilds:
+  cpu-features: true
+  electron: true
+  electron-winstaller: false
+  esbuild: true
+  ssh2: true
+overrides:
+  # electron-builder 26.15 uses the cache-mode API introduced after @electron/get 3.
+  'app-builder-lib>@electron/get': 5.1.0

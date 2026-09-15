@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Read-only implementation planning references; not application dependencies or a validated deployment combination",
+  "retrievedOn": "2026-09-12",
+  "updatedOn": "2026-09-14",
+  "validation": "static-source-and-release-tag-comparison-only",
+  "deploymentValidated": false,
+  "repositories": [
+    {
+      "name": "jumpserver",
+      "url": "https://github.com/jumpserver/jumpserver.git",
+      "path": "sources/jumpserver",
+      "checkout": "38fd77583aa6805fc19007354c27846d52d0225e",
+      "reference": "v4.10.19",
+      "commitDate": "2026-08-20T19:51:32+08:00",
+      "observedRootLicense": "GNU GPL version 3"
+    },
+    {
+      "name": "luna",
+      "url": "https://github.com/jumpserver/luna.git",
+      "path": "sources/luna",
+      "checkout": "bb02a9846a8a3f21ce6bc84c9187fdb961b20cfb",
+      "reference": "design-baseline-fixed-commit",
+      "commitDate": "2026-09-12T00:17:30+08:00",
+      "comparisonTag": "v4.10.19",
+      "comparisonCommit": "5a7a9a70bd7cdd77fde1753af58a80f3918b14ab",
+      "observedRootLicense": "MIT",
+      "licenseNote": "The root LICENSE changed relative to the comparison tag. This observation is not a conclusion about the license of every file or historical code. Review provenance before copying."
+    },
+    {
+      "name": "koko",
+      "url": "https://github.com/jumpserver/koko.git",
+      "path": "sources/koko",
+      "checkout": "cb06f265992dd3ea4173432c028d50cfbf96b2f1",
+      "reference": "design-baseline-fixed-commit",
+      "commitDate": "2026-09-12T08:19:52+08:00",
+      "comparisonTag": "v4.10.19",
+      "comparisonCommit": "1a6befc9c75d1e1726787d7635fa2aee2593ab05",
+      "observedRootLicense": "GNU GPL version 3"
+    },
+    {
+      "name": "chen",
+      "url": "https://github.com/jumpserver/chen.git",
+      "path": "sources/chen",
+      "checkout": "d9890760dfdf87595bcaf6ca388fd96892f8f12f",
+      "reference": "design-baseline-fixed-commit",
+      "commitDate": "2026-09-11T22:50:14+08:00",
+      "comparisonTag": "v4.10.19",
+      "comparisonCommit": "86abab892e34b67327dc97331d99af7c9c08e45d",
+      "observedRootLicense": "GNU GPL version 3"
+    },
+    {
+      "name": "client",
+      "url": "https://github.com/jumpserver/client.git",
+      "path": "sources/client",
+      "checkout": "d0741ef1a6aa36f95a1e2a6ab99653bd1def212a",
+      "reference": "v4.1.7",
+      "commitDate": "2026-08-28T17:27:46+08:00",
+      "retrievedOn": "2026-09-14",
+      "comparisonBranch": "dev",
+      "comparisonCommit": "7b03884d54994600391fda1ab1717f2da43aea28",
+      "observedRootLicense": "MIT",
+      "licenseNote": "Root LICENSE only; embedded binaries, plugins and dependencies require separate provenance review before copying."
+    }
+  ],
+  "notes": [
+    "JumpServer, Luna, KoKo and Chen remain at the original fixed references. Client is detached at v4.1.7; its retrieved dev branch is retained only for comparison.",
+    "No JumpServer deployment, database writes, file transfers, compatibility tests or performance tests were executed.",
+    "Do not package sources/ with the desktop application. Pin reviewed dependencies separately when implementation starts.",
+    "Termius was referenced through official documentation and public product images, not copied into application assets."
+  ]
+}

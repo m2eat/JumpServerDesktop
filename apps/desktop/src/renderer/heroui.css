@@ -1,0 +1,159 @@
+@layer theme, base, components, utilities;
+
+/* No preflight or default palette: terminal/editor surfaces and app themes own their globals. */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "tw-animate-css";
+@import "@heroui/styles/themes/shared/theme.css";
+@import "@heroui/styles/utilities";
+@import "@heroui/styles/variants";
+@import "@heroui/styles/components/button.css" layer(components);
+@import "@heroui/styles/components/input.css" layer(components);
+@import "@heroui/styles/components/label.css" layer(components);
+@import "@heroui/styles/components/select.css" layer(components);
+@import "@heroui/styles/components/combo-box.css" layer(components);
+@import "@heroui/styles/components/list-box.css" layer(components);
+@import "@heroui/styles/components/list-box-item.css" layer(components);
+@import "@heroui/styles/components/switch.css" layer(components);
+@import "@heroui/styles/components/textarea.css" layer(components);
+@import "@heroui/styles/components/checkbox.css" layer(components);
+@import "@heroui/styles/components/radio.css" layer(components);
+@import "@heroui/styles/components/radio-group.css" layer(components);
+@import "@heroui/styles/components/modal.css" layer(components);
+@import "@heroui/styles/components/alert-dialog.css" layer(components);
+@import "@heroui/styles/components/dropdown.css" layer(components);
+@import "@heroui/styles/components/menu-item.css" layer(components);
+@import "@heroui/styles/components/popover.css" layer(components);
+
+/* Bespoke rows and toolbars own their geometry; standard actions use .app-action. */
+@layer components {
+  .button {
+    justify-content: normal;
+    height: auto;
+    width: auto;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    font: inherit;
+    white-space: normal;
+  }
+  .button svg:not([data-slot="spinner"] svg, [data-slot="link-icon"] svg) {
+    width: revert;
+    height: revert;
+    margin: 0;
+  }
+  /* App sections own spacing; do not stack a second dialog shell around them. */
+  .modal__dialog, .alert-dialog__dialog { padding: 0; }
+  .modal__header, .alert-dialog__header {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .modal__heading, .alert-dialog__heading { margin: 0; font-size: 16px; line-height: 1.4; }
+  .modal__body, .alert-dialog__body { margin: 0; padding: 0; }
+  .modal__header + .modal__body, .modal__header + .modal__footer,
+  .modal__body + .modal__footer, .alert-dialog__header + .alert-dialog__body,
+  .alert-dialog__body + .alert-dialog__footer { margin-top: 0; }
+}
+
+:root {
+  --background: var(--canvas);
+  --foreground: var(--text);
+  --surface-foreground: var(--text);
+  --default: var(--raised);
+  --default-hover: var(--raised-hover);
+  --default-foreground: var(--text);
+  --accent-foreground: var(--text-on-accent);
+  --accent-soft-foreground: var(--text);
+  --danger-foreground: var(--text-on-accent);
+  --danger-hover: var(--danger);
+  --separator: var(--border-soft);
+  --backdrop: var(--overlay);
+  --z-index-overlay: 80;
+  --focus: var(--accent);
+  --field-background: var(--input-background);
+  --field-foreground: var(--text);
+  --field-placeholder: var(--muted);
+  --field-border: var(--border);
+  --field-border-hover: var(--muted);
+  --field-border-focus: var(--accent);
+  --field-hover: var(--input-background);
+  --field-focus: var(--input-background);
+  --field-shadow: none;
+  --field-border-width: 1px;
+  --border-width: 1px;
+  --radius: 6px;
+  --field-radius: 7px;
+  --disabled-opacity: .4;
+  --cursor-interactive: pointer;
+  --cursor-disabled: default;
+  --ring-offset-width: 2px;
+  --overlay-foreground: var(--text);
+  --overlay-shadow: none;
+  --scrollbar-width: thin;
+  --scrollbar-thumb: var(--scrollbar);
+  --scrollbar-track: transparent;
+  --scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  --scrollbar-gutter: auto;
+}
+
+/* HeroUI's overlay token means a menu surface, not our modal backdrop. */
+.select__popover, .combo-box__popover, .dropdown__popover, .popover__content {
+  --overlay: var(--surface-2);
+  z-index: 70;
+  max-height: min(320px, var(--available-height));
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.select__trigger, .select__value, .input, .textarea, .list-box-item, .menu-item {
+  font-size: 12px;
+  line-height: 1.4;
+}
+.select__trigger, .input { min-height: 0; }
+.select__trigger { align-items: center; text-align: left; }
+.list-box { margin: 0; list-style: none; }
+.list-box-item { min-height: 32px; border-radius: 5px; }
+.list-box-item[data-focused="true"] { background: var(--hover); }
+.list-box-item[data-selected="true"] { color: var(--text); background: var(--accent-soft); }
+
+/* Desktop controls do not bounce or change size on press. */
+.button { height: auto; width: auto; transform: none; }
+.button:active, .button[data-pressed="true"] { transform: none; }
+.button[data-focus-visible="true"] {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+/* A focused field gets one accent border, not the library ring plus an app outline. */
+:is(.input, .textarea, .select__trigger):is(:focus, :focus-visible, [data-focused="true"], [data-focus-visible="true"]) {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: none;
+}
+.input-frame .input { padding: 0; border: 0; border-radius: 0; box-shadow: none; }
+.input-frame .input:focus, .input-frame .input:focus-visible { outline: none; box-shadow: none; }
+
+.modal__dialog, .alert-dialog__dialog {
+  --overlay: var(--surface-2);
+  color: var(--text);
+}
+.modal__backdrop, .alert-dialog__backdrop {
+  background: var(--overlay);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+/* Flat overlays: no haze, glow, or zoom during opening and closing. */
+.modal__backdrop, .alert-dialog__backdrop,
+.modal__container, .alert-dialog__container,
+.select__popover, .combo-box__popover, .dropdown__popover, .popover__content {
+  animation: none;
+}
+.modal__container, .alert-dialog__container { max-width: 100%; }
+.dropdown__trigger:active, .dropdown__trigger[data-pressed="true"],
+.list-box-item:active, .list-box-item[data-pressed="true"],
+.menu-item:active, .menu-item[data-pressed="true"] { transform: none; }

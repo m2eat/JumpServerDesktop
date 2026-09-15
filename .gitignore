@@ -1,0 +1,45 @@
+# Dependencies and generated application output
+node_modules/
+out/
+out-dev/
+release/
+dist/
+coverage/
+.cache/
+.pnpm-store/
+*.tsbuildinfo
+
+# Read-only upstream checkouts are not application dependencies.
+# Keep only their pinned provenance manifest in this repository.
+sources/*
+!sources/reference-manifest.json
+
+# Local configuration, credentials, signing material and runtime profiles
+.env
+.env.*
+!.env.example
+*.local
+*.log
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.db
+*.db-*
+*.pem
+*.key
+*.p12
+*.pfx
+*.mobileprovision
+credentials/
+user-data/
+test-results/
+playwright-report/
+
+# Editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+*~

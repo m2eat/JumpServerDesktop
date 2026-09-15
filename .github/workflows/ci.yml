@@ -1,0 +1,235 @@
+name: CI and release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*.*.*"
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-latest
+          - name: Windows
+            os: windows-latest
+          - name: macOS
+            os: macos-14
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.15.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+  package:
+    name: Package (${{ matrix.name }})
+    needs: verify
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            artifact: windows-x64
+            target: --win --x64
+          - name: Linux x64
+            os: ubuntu-latest
+            artifact: linux-x64
+            target: --linux --x64
+          - name: macOS x64 and arm64
+            os: macos-14
+            artifact: macos-x64-arm64
+            target: --mac --x64 --arm64
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.15.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Enable Linux user namespaces for Electron sandbox
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo sysctl -w kernel.unprivileged_userns_clone=1
+          if sysctl -n kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+
+
+      - name: Package unsigned release artifacts
+        shell: bash
+        run: |
+          pnpm build
+          pnpm exec electron-builder ${{ matrix.target }} --publish never
+
+      - name: Smoke packaged startup and IPC bridge
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            xvfb-run -a pnpm release:smoke release
+          else
+            pnpm release:smoke release
+          fi
+
+      - name: Upload platform artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.artifact }}
+          if-no-files-found: error
+          compression-level: 0
+          path: |
+            release/*.exe
+            release/*.AppImage
+            release/*.deb
+            release/*.dmg
+            release/*.zip
+            release/*.blockmap
+            release/latest*.yml
+
+  release:
+    name: Validate and publish release
+    needs: package
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Download platform artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Validate release set and generate checksums
+        shell: bash
+        run: node scripts/prepare-release.mjs release-assets "${GITHUB_REF_NAME#v}"
+
+      - name: Refuse published tags and replace a prior draft
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
+          status="$(
+            curl --silent --show-error \
+              --output "$response_file" \
+              --write-out "%{http_code}" \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer ${GITHUB_TOKEN}" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}"
+          )"
+          case "$status" in
+            404)
+              ;;
+            200)
+              if [[ "$(jq -r '.draft' "$response_file")" != "true" ]]; then
+                echo "Refusing to alter published release ${GITHUB_REF_NAME}."
+                exit 1
+              fi
+              draft_id="$(jq -r '.id' "$response_file")"
+              curl --fail --silent --show-error \
+                --request DELETE \
+                --header "Accept: application/vnd.github+json" \
+                --header "Authorization: Bearer ${GITHUB_TOKEN}" \
+                --header "X-GitHub-Api-Version: 2022-11-28" \
+                "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${draft_id}"
+              ;;
+            *)
+              echo "Could not inspect release ${GITHUB_REF_NAME}; GitHub returned HTTP ${status}."
+              cat "$response_file"
+              exit 1
+              ;;
+          esac
+
+      - name: Create draft release and upload verified assets
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          name: JumpServer Desktop ${{ github.ref_name }}
+          draft: true
+          prerelease: false
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: release-assets/*
+          body: |
+            ## Update delivery
+            - Windows x64 NSIS and Linux x64 AppImage builds can use the in-app updater from this public release.
+            - Linux `.deb` packages are manual downloads; use this release page for updates.
+            - macOS updates are manual downloads only. The application does not download or install macOS updates automatically.
+
+            ## Signing status
+            **All release artifacts are unsigned.** macOS builds are not signed or notarized and may be blocked by Gatekeeper. Download only from this trusted GitHub Release; do not bypass platform security prompts.
+
+      - name: Publish the fully uploaded release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          draft: false
+          prerelease: false

@@ -1,0 +1,126 @@
+{
+  "name": "jumpserver-desktop",
+  "version": "0.1.0",
+  "description": "JumpServer community desktop workstation",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.15.1",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/m2eat/JumpServerDesktop.git"
+  },
+  "homepage": "https://github.com/m2eat/JumpServerDesktop#readme",
+  "bugs": {
+    "url": "https://github.com/m2eat/JumpServerDesktop/issues"
+  },
+  "license": "GPL-3.0-or-later",
+  "author": {
+    "name": "JumpServer Desktop contributors",
+    "email": "m2eat@users.noreply.github.com",
+    "url": "https://github.com/m2eat/JumpServerDesktop"
+  },
+  "desktopName": "org.jumpserver.community.desktop",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "pack": "electron-vite build && electron-builder --dir --publish never -c.mac.identity=null",
+    "dist": "electron-vite build && electron-builder --publish never",
+    "release:version": "node scripts/release-version.mjs",
+    "release:smoke": "node scripts/smoke-packaged.mjs"
+  },
+  "build": {
+    "appId": "org.jumpserver.community.desktop",
+    "productName": "JumpServer Desktop",
+    "protocols": [
+      {
+        "name": "JumpServer OAuth",
+        "schemes": [
+          "jms"
+        ]
+      }
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "artifactName": "${name}-${version}-${os}-${arch}.${ext}",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "m2eat",
+        "repo": "JumpServerDesktop",
+        "private": false
+      }
+    ],
+    "files": [
+      "out/**/*",
+      "package.json",
+      "LICENSE"
+    ],
+    "asarUnpack": [
+      "**/font-list/libs/**"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "identity": null,
+      "hardenedRuntime": false,
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development"
+    }
+  },
+  "dependencies": {
+    "@heroui/react": "3.2.5",
+    "@heroui/styles": "3.2.5",
+    "@monaco-editor/react": "4.7.0",
+    "@react-aria/i18n": "3.13.1",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/addon-search": "0.16.0",
+    "@xterm/xterm": "6.0.0",
+    "electron-updater": "6.8.9",
+    "font-list": "2.1.0",
+    "i18next": "26.4.2",
+    "lucide-react": "1.45.0",
+    "monaco-editor": "0.56.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-i18next": "17.0.14",
+    "ssh2": "1.17.0",
+    "tailwindcss": "^4.3.3",
+    "tw-animate-css": "1.4.0",
+    "zod": "4.6.2"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@types/node": "22.20.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/ssh2": "1.15.6",
+    "@vitejs/plugin-react": "5.2.0",
+    "electron": "44.3.0",
+    "electron-builder": "26.15.3",
+    "electron-vite": "5.0.0",
+    "typescript": "7.0.2",
+    "vite": "7.3.6",
+    "vitest": "5.0.0"
+  }
+}

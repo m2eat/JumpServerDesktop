@@ -1,0 +1,325 @@
+.local-browser {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  flex-direction: column;
+  color: var(--text);
+  background: var(--canvas);
+  font-size: 13px;
+  container-type: inline-size;
+}
+
+.local-browser [data-slot="button"] {
+  display: inline-flex;
+  min-height: 31px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 7px;
+  padding: 0 9px;
+  color: var(--text);
+  background: var(--raised);
+  cursor: pointer;
+}
+
+.local-browser [data-slot="button"]:hover:not([data-disabled]) {
+  background: var(--raised-hover);
+}
+
+.local-browser [data-slot="button"][data-disabled] {
+  cursor: default;
+  opacity: .4;
+}
+
+.local-browser-header {
+  display: flex;
+  min-height: 64px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 19px;
+  background: var(--surface);
+}
+
+.local-browser-label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  margin-right: auto;
+  font-size: 14px;
+}
+
+.local-browser .local-header-action {
+  padding: 0 6px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 12px;
+}
+
+.local-browser-filter {
+  display: flex;
+  height: 34px;
+  align-items: center;
+  gap: 9px;
+  margin: 9px 16px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0 9px;
+  color: var(--muted);
+}
+
+.local-browser-filter [data-slot="input"] {
+  min-width: 0;
+  flex: 1;
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+}
+
+.local-browser-filter [data-slot="button"] {
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.local-browser-empty {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 30px 24px 80px;
+  text-align: center;
+}
+
+.local-empty-icon {
+  display: grid;
+  width: 70px;
+  height: 70px;
+  place-items: center;
+  border: 1px solid var(--raised);
+  border-radius: 18px;
+  color: var(--accent);
+  background: var(--raised);
+}
+
+.local-browser-empty h2 {
+  margin: 27px 0 12px;
+  font-size: 21px;
+  font-weight: 550;
+}
+
+.local-browser-empty p {
+  margin: 0 0 24px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+.local-browser-empty [data-slot="button"] {
+  min-height: 39px;
+  padding: 0 17px;
+  font-size: 13px;
+}
+
+.local-browser-path {
+  display: flex;
+  min-height: 49px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 14px;
+  background: var(--surface);
+}
+
+.local-browser-path > [data-slot="button"]:not(.local-browser-path-location) {
+  width: 30px;
+  min-height: 30px;
+  flex: 0 0 30px;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+}
+
+.local-browser-path-location {
+  min-width: 0;
+  flex: 1;
+  justify-content: flex-start !important;
+  overflow: hidden;
+  padding: 0 7px !important;
+  color: var(--text) !important;
+  background: transparent !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-browser-path-location svg {
+  flex: 0 0 auto;
+  fill: currentColor;
+  color: var(--icon-files);
+}
+
+.local-browser-path-input {
+  min-width: 0;
+  height: 30px;
+  flex: 1;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 0 8px;
+  outline: none;
+  color: var(--text);
+  background: var(--canvas);
+  font: inherit;
+}
+
+.local-browser-path-input:focus-visible {
+  outline: none;
+}
+
+.local-browser-table-head,
+.local-browser .local-browser-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(130px, .65fr) 75px 75px;
+  column-gap: 13px;
+  align-items: center;
+}
+
+.local-browser-table-head {
+  min-height: 43px;
+  border-top: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--border);
+  padding: 0 20px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.local-browser-list {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+}
+
+.local-browser .local-browser-row {
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  border-radius: 0;
+  padding: 0 20px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 12px;
+  text-align: left;
+}
+
+.local-browser .local-browser-row:hover:not([data-disabled]) {
+  background: var(--hover);
+}
+
+.local-browser .local-browser-row.selected {
+  background: var(--selected);
+}
+
+.local-browser-row > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-browser-row .local-file-name {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.local-file-name > svg {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.local-directory-name > svg {
+  color: var(--icon-files);
+}
+
+.local-file-name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.local-file-modified {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.local-no-files {
+  padding: 38px 20px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.local-browser footer {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--border-soft);
+  padding: 0 17px;
+  color: var(--muted);
+  background: var(--surface);
+}
+
+.local-browser footer small {
+  font-size: 11px;
+}
+
+.local-browser footer [data-slot="button"] {
+  color: var(--success);
+  background: var(--accent-soft);
+  font-size: 12px;
+}
+
+.local-browser-error {
+  margin: 0;
+  padding: 10px 16px;
+  color: var(--danger-text);
+  background: var(--danger-soft);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.local-browser-status {
+  border-top: 1px solid var(--border-soft);
+  padding: 7px 17px;
+  color: var(--muted);
+}
+
+@container (max-width: 630px) {
+  .local-browser-table-head,
+  .local-browser .local-browser-row {
+    grid-template-columns: minmax(140px, 1fr) 90px 65px;
+  }
+
+  .local-file-modified,
+  .local-browser-table-head > span:nth-child(2) {
+    display: none;
+  }
+}
+
+@container (max-width: 400px) {
+  .local-header-action span {
+    display: none;
+  }
+
+  .local-browser-table-head,
+  .local-browser .local-browser-row {
+    grid-template-columns: minmax(100px, 1fr) 70px;
+  }
+
+  .local-browser-row > span:last-child,
+  .local-browser-table-head > span:last-child {
+    display: none;
+  }
+}

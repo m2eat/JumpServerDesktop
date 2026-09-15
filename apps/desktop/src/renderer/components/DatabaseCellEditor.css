@@ -1,0 +1,157 @@
+.db-cell-editor.database-cell-editor {
+  width: min(320px, calc(100vw - 48px));
+  min-width: 0;
+  max-width: 100%;
+  max-height: min(42vh, 286px);
+  box-sizing: border-box;
+  overflow: auto;
+}
+
+.db-cell-editor.database-cell-editor > .database-cell-editor__mode,
+.db-cell-editor.database-cell-editor > .database-cell-editor__value,
+.db-cell-editor.database-cell-editor > .database-cell-editor__datetime-fields,
+.db-cell-editor.database-cell-editor > .database-cell-editor__actions {
+  margin-top: 0;
+}
+
+.db-cell-editor.database-cell-editor > .database-cell-editor__mode,
+.db-cell-editor.database-cell-editor > .database-cell-editor__value {
+  display: grid;
+  gap: 4px;
+  justify-content: initial;
+}
+
+.db-cell-editor.database-cell-editor > .database-cell-editor__value {
+  margin-top: 6px;
+}
+
+.database-cell-editor label,
+.database-cell-editor legend,
+.database-cell-editor__value > span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.database-cell-editor__control.input,
+.database-cell-editor__control.textarea,
+.database-cell-editor__select .select__trigger {
+  width: 100%;
+  min-height: 28px;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 6px;
+  color: var(--text);
+  background: var(--input-background);
+  font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.database-cell-editor__select .select__trigger {
+  height: auto;
+  text-align: left;
+}
+
+.database-cell-editor__control.textarea {
+  min-height: 72px;
+  max-height: 148px;
+  resize: vertical;
+}
+
+.database-cell-editor__control.input[data-focus-visible='true'],
+.database-cell-editor__control.textarea[data-focus-visible='true'],
+.database-cell-editor__select .select__trigger[data-focus-visible='true'] {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.database-cell-editor__control.input[aria-invalid='true'],
+.database-cell-editor__control.textarea[aria-invalid='true'],
+.database-cell-editor__select[aria-invalid='true'] .select__trigger,
+.database-cell-editor__set[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.database-cell-editor__datetime-fields {
+  display: grid;
+  grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr);
+  gap: 5px;
+}
+
+.database-cell-editor__datetime-fields > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.database-cell-editor__set {
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  padding: 4px 6px 6px;
+}
+
+.database-cell-editor__set-options {
+  display: grid;
+  max-height: 116px;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 4px 8px;
+  overflow: auto;
+}
+
+.database-cell-editor__set-option {
+  min-width: 0;
+  color: var(--text);
+}
+
+.database-cell-editor__set-option [data-slot='checkbox-content'] {
+  min-width: 0;
+  gap: 5px;
+}
+
+.database-cell-editor__set-option [data-slot='checkbox-control'] {
+  flex: 0 0 auto;
+}
+
+.database-cell-editor__set-option [data-slot='label'] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.database-cell-editor__hint,
+.database-cell-editor__json-note,
+.database-cell-editor__error {
+  display: block;
+  margin-top: 5px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.database-cell-editor__hint,
+.database-cell-editor__json-note {
+  color: var(--muted);
+}
+
+.database-cell-editor__error {
+  color: var(--danger);
+}
+
+.db-cell-editor.database-cell-editor > .database-cell-editor__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.database-cell-editor__actions .app-action:last-child {
+  border-color: var(--accent-soft);
+  color: var(--text-on-accent);
+  background: var(--accent);
+}
+
+.database-cell-editor__select-popover {
+  z-index: 90;
+  max-width: min(320px, calc(100vw - 32px));
+}

@@ -1,0 +1,208 @@
+.quick-switcher-backdrop {
+  z-index: 80;
+  align-items: flex-start;
+  background: var(--overlay);
+}
+
+.quick-switcher-container {
+  width: 100%;
+  height: 100%;
+  flex: none;
+  padding: min(14vh, 120px) 20px 20px;
+}
+
+.quick-switcher {
+  display: flex;
+  width: min(680px, 100%);
+  max-width: 680px;
+  max-height: min(560px, calc(100dvh - min(14vh, 120px) - 20px));
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  color: var(--text);
+  background: var(--surface-2);
+  box-shadow: none;
+}
+
+.quick-switcher-search {
+  display: flex;
+  min-height: 42px;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 9px;
+  padding: 0 11px 0 13px;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--muted);
+  background: var(--surface-2);
+}
+
+.quick-switcher-search input {
+  min-width: 0;
+  flex: 1;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  background: transparent;
+}
+
+.quick-switcher-search:focus-within {
+  border-bottom-color: var(--focus-ring);
+}
+
+.quick-switcher-search input::placeholder {
+  color: var(--dim);
+}
+
+.quick-switcher-jump-chip {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.2;
+  background: var(--hover);
+}
+
+.quick-switcher-results {
+  min-height: 0;
+  flex: 1;
+  padding: 8px;
+  overflow-y: auto;
+}
+
+.quick-switcher-group + .quick-switcher-group {
+  margin-top: 10px;
+}
+
+.quick-switcher-group h2 {
+  margin: 0;
+  padding: 5px 7px 4px;
+  color: var(--dim);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.quick-switcher-entry {
+  display: grid;
+  width: 100%;
+  min-height: 40px;
+  grid-template-columns: 25px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--muted);
+  text-align: left;
+  font: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.quick-switcher-entry:hover,
+.quick-switcher-entry.is-selected {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.quick-switcher-entry:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.quick-switcher-entry-icon {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--muted);
+  background: var(--hover);
+}
+
+.quick-switcher-entry-icon.is-terminal { color: var(--icon-terminal); background: var(--accent-soft); }
+.quick-switcher-entry-icon.is-files { color: var(--icon-files); background: var(--icon-files-soft); }
+.quick-switcher-entry-icon.is-database { color: var(--icon-database); background: var(--warning-soft); }
+.quick-switcher-entry-icon.is-command { color: var(--icon-command); background: var(--icon-remote-soft); }
+
+.quick-switcher-entry-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.quick-switcher-entry-copy strong,
+.quick-switcher-entry-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-switcher-entry-copy strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.quick-switcher-entry-copy small {
+  color: var(--dim);
+  font-size: 10px;
+}
+
+.quick-switcher-entry kbd,
+.quick-switcher-help kbd {
+  padding: 2px 5px;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  color: var(--dim);
+  font-family: inherit;
+  font-size: 9px;
+  line-height: 1.1;
+  background: var(--hover);
+}
+
+.quick-switcher-loading,
+.quick-switcher-empty {
+  display: flex;
+  min-height: 86px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.quick-switcher-loading i {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border-soft);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: quick-switcher-spin 800ms linear infinite;
+}
+
+.quick-switcher-help {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 15px;
+  padding: 9px 13px;
+  border-top: 1px solid var(--border-soft);
+  color: var(--dim);
+  font-size: 10px;
+  background: var(--surface-2);
+}
+
+.quick-switcher-help span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+@keyframes quick-switcher-spin {
+  to { transform: rotate(360deg); }
+}
