@@ -251,6 +251,7 @@ export function createAuthRuntime(options: CreateAuthRuntimeOptions): {
   let loginInFlight = false;
   let initialized = false;
   let restoreInFlight: Promise<void> | undefined;
+  let disposal: Promise<void> | undefined;
   let authNotice: string | undefined;
   let rememberedSiteId: string | undefined;
   let lifecycle = new AbortController();
@@ -895,6 +896,7 @@ export function createAuthRuntime(options: CreateAuthRuntimeOptions): {
   };
 
   const invoke = async (command: string, args: unknown): Promise<unknown> => {
+    if (disposal) throw new Error('认证运行时已经关闭');
     const parsedCommand = runtimeCommandSchema.parse(command);
     if (parsedCommand === 'app.bootstrap') {
       emptyArgsSchema.parse(args);
@@ -1020,5 +1022,19 @@ export function createAuthRuntime(options: CreateAuthRuntimeOptions): {
     throw new Error(`认证运行时不处理命令：${parsedCommand}`);
   };
 
-  return { host, invoke, dispose: async () => { authOperation += 1; await clearNetworkState(); } };
+  return {
+    host,
+    invoke,
+    dispose: () => {
+      if (disposal) return disposal;
+      authOperation += 1;
+      disposal = clearNetworkState().then(() => {
+        storage.close();
+      }).catch((error: unknown) => {
+        disposal = undefined;
+        throw error;
+      });
+      return disposal;
+    }
+  };
 }

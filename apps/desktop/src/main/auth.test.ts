@@ -143,6 +143,7 @@ interface AuthRuntime {
   invoke(command: string, args: unknown): Promise<unknown>;
   dispose(): Promise<void>;
 }
+const runtimes: AuthRuntime[] = [];
 
 function json(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
@@ -185,8 +186,7 @@ function makeRuntime() {
   const emit = vi.fn();
   const onLogout = vi.fn(async () => {});
   const authorizeInBrowser = vi.fn(async () => 'jms://auth/callback?code=unused&state=unused');
-  return {
-    runtime: createAuthRuntime({
+  const runtime = createAuthRuntime({
       window: {} as never,
       emit,
       update: vi.fn(),
@@ -194,7 +194,10 @@ function makeRuntime() {
       tasks: () => [],
       onLogout,
       authorizeInBrowser
-    }),
+    });
+  runtimes.push(runtime);
+  return {
+    runtime,
     emit,
     onLogout,
     authorizeInBrowser
@@ -284,6 +287,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  await Promise.all(runtimes.splice(0).map(runtime => runtime.dispose()));
   await rm(userData, { recursive: true, force: true });
 });
 
@@ -307,6 +311,7 @@ describe('desktop OAuth authentication lifecycle', () => {
     await saveSite(first.runtime);
     await expect(bootstrap(first.runtime)).resolves.toMatchObject({ identity });
     await first.runtime.dispose();
+    await expect(bootstrap(first.runtime)).rejects.toThrow();
 
     expect(currentRecord()).toMatchObject({ identity });
     expect(vault.clear).not.toHaveBeenCalled();
