@@ -38,7 +38,7 @@ const messages = {
   '安装更新会丢弃未保存编辑、关闭所有连接并停止传输。': 'Installing the update discards unsaved edits, closes all connections, and stops transfers.',
   '稍后安装': 'Install later',
   '安装并重启': 'Install and restart',
-  '更新安装未能启动，工作台仍然打开。': 'The update could not start installing. The workbench remains open.'
+  '更新安装未能启动，应用将重新打开。请重试或从发布页下载安装包。': 'The update could not start installing. The app will reopen. Retry or download the installer from the release page.'
 } satisfies Record<string, string>;
 
 // Main-process instance: never share renderer state or translate external data.

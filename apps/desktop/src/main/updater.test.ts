@@ -15,13 +15,14 @@ class FakeUpdater extends EventEmitter {
   quitAndInstall = vi.fn();
 }
 
-function automaticUpdates(updater: FakeUpdater, published: AppUpdateState[]): AppUpdateService {
+function automaticUpdates(updater: FakeUpdater, published: AppUpdateState[], installFailed?: () => void): AppUpdateService {
   return new AppUpdateService({
     currentVersion: '0.1.0',
     development: false,
     platform: 'win32',
     updater: updater as unknown as AppUpdater,
     publish: state => published.push(state),
+    installFailed,
     openExternal: async () => {}
   });
 }
@@ -118,5 +119,33 @@ describe('app update lifecycle', () => {
     expect(updates.install()).toBe(false);
     expect(updater.quitAndInstall).toHaveBeenCalledTimes(1);
     expect(updater.quitAndInstall).toHaveBeenCalledWith(false, true);
+  });
+
+  it('reports installer error events and allows retry after synchronous or delayed failures', () => {
+    const updater = new FakeUpdater();
+    const published: AppUpdateState[] = [];
+    const installFailed = vi.fn();
+    const updates = automaticUpdates(updater, published, installFailed);
+    const ready = () => {
+      updater.emit('checking-for-update');
+      updater.emit('update-available', { version: '0.2.0' });
+      updater.emit('update-downloaded', { version: '0.2.0' });
+    };
+    ready();
+    updater.quitAndInstall.mockImplementationOnce(() => {
+      updater.emit('error', new Error('Installer permission denied'));
+    });
+    expect(updates.install()).toBe(false);
+    expect(updates.snapshot()).toMatchObject({ phase: 'error', error: 'Installer permission denied' });
+    expect(published.at(-1)?.phase).toBe('error');
+    expect(installFailed).toHaveBeenCalledTimes(1);
+
+    ready();
+    expect(updates.install()).toBe(true);
+    updater.emit('error', new Error('Installer process could not start'));
+    expect(published.at(-1)).toMatchObject({ phase: 'error', error: 'Installer process could not start' });
+    expect(installFailed).toHaveBeenCalledTimes(2);
+    ready();
+    expect(updates.isInstallReady()).toBe(true);
   });
 });

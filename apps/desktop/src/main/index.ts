@@ -107,13 +107,23 @@ async function createWindow(): Promise<void> {
     }
   );
   const emit = (event: AppEvent): void => registry.accept(event);
+  let installRecoveryRequested = false;
+  const recoverFromInstallFailure = (): void => {
+    if (installRecoveryRequested) return;
+    installRecoveryRequested = true;
+    // Authentication storage is already closed; restart rather than unlock a disposed runtime.
+    dialog.showErrorBox(nativeText('安装更新并重启'), nativeText('更新安装未能启动，应用将重新打开。请重试或从发布页下载安装包。'));
+    app.relaunch();
+    app.exit(1);
+  };
   const appUpdates = createAppUpdateService({
     currentVersion: app.getVersion(),
     development,
     platform: process.platform,
     appImage: process.env.APPIMAGE,
     publish: update => emit({ type: 'update', update }),
-    openExternal: url => shell.openExternal(url)
+    openExternal: url => shell.openExternal(url),
+    installFailed: recoverFromInstallFailure
   });
   let exitApproved = false;
   let closePromptPending = false;
@@ -185,10 +195,7 @@ async function createWindow(): Promise<void> {
           return;
         }
         exitApproved = true;
-        if (!appUpdates.install()) {
-          exitApproved = false;
-          emit({ type: 'notice', message: nativeText('更新安装未能启动，工作台仍然打开。') });
-        }
+        if (!appUpdates.install()) recoverFromInstallFailure();
       } finally {
         if (!exitApproved) {
           exitCleanupPending = false;

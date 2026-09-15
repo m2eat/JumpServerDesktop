@@ -146,7 +146,7 @@ sources/reference-manifest.json  上游只读参考版本和许可观察记录
 发布下一版本前，先完成代码提交并保持工作区干净：
 
 ```sh
-pnpm release:version 0.1.2
+pnpm release:version 0.1.3
 git push origin main --follow-tags
 ```
 

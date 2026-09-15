@@ -23,6 +23,7 @@ export interface AppUpdateServiceOptions {
   appImage?: string;
   publish: (state: AppUpdateState) => void;
   openExternal: (url: string) => Promise<void>;
+  installFailed?: () => void;
   updater: AppUpdater;
 }
 
@@ -82,7 +83,11 @@ export class AppUpdateService {
     this.replace({ phase: 'downloaded', ...(latestVersion ? { latestVersion } : {}) });
   };
   private readonly onError = (error: Error): void => {
-    if (this.state.phase === 'checking' || this.state.phase === 'downloading') this.fail(error);
+    if (this.installRequested) {
+      this.installRequested = false;
+      this.fail(error);
+      this.options.installFailed?.();
+    } else if (this.state.phase === 'checking' || this.state.phase === 'downloading') this.fail(error);
   };
 
   constructor(private readonly options: AppUpdateServiceOptions) {
@@ -143,10 +148,11 @@ export class AppUpdateService {
     this.installRequested = true;
     try {
       this.options.updater.quitAndInstall(false, true);
-      return true;
+      return this.installRequested;
     } catch (error) {
       this.installRequested = false;
       this.fail(error);
+      this.options.installFailed?.();
       return false;
     }
   }
