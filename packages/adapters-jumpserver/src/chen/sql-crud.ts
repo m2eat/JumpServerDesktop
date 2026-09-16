@@ -467,7 +467,9 @@ function compileChanges(
     const original = snapshotRow(verified, update.row, '更新原始行');
     claimTarget(verified, original, usedTargets, '更新');
     const assignments = updateAssignments(verified, original, update.values);
-    statements.push(`UPDATE ${tableName} SET ${assignments} WHERE ${whereClause(verified.columns, original)} LIMIT 1`);
+    // Protect every assigned field without conflicting on unrelated concurrent edits.
+    const guardColumns = verified.columns.filter((column) => column.primaryKey || Object.hasOwn(update.values, column.name));
+    statements.push(`UPDATE ${tableName} SET ${assignments} WHERE ${whereClause(guardColumns, original)} LIMIT 1`);
   }
 
   for (const values of input.inserts) statements.push(insertStatement(tableName, verified, values));

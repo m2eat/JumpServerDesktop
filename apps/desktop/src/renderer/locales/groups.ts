@@ -1,0 +1,20 @@
+export const groupMessages: Record<string, string> = {
+  '资产分组': 'Asset groups',
+  '授权分组': 'Authorized groups',
+  '分组加载失败': 'Could not load groups',
+  '分组请求已失效': 'The group request is no longer current.',
+  '该分组已不存在或不再可访问，请刷新分组。': 'This group no longer exists or is no longer accessible. Refresh the groups.',
+  '收起分组 {{name}}': 'Collapse group {{name}}',
+  '展开分组 {{name}}': 'Expand group {{name}}',
+  '搜索分组': 'Search groups',
+  '刷新分组': 'Refresh groups',
+  '搜索分组名称或路径': 'Search group names or paths',
+  '清除分组搜索': 'Clear group search',
+  '登录后浏览授权分组': 'Sign in to browse authorized groups',
+  '正在搜索分组…': 'Searching groups…',
+  '分组搜索结果': 'Group search results',
+  '没有找到匹配的分组': 'No matching groups',
+  '正在读取授权分组…': 'Loading authorized groups…',
+  '没有可访问的分组，仍可浏览全部资产。': 'No accessible groups. You can still browse all assets.',
+  '重试': 'Retry'
+};

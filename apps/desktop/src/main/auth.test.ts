@@ -217,6 +217,18 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
   return { promise: deferred.promise, resolve: deferred.resolve };
 }
 
+function permittedNode(id: string, key: string, name: string, path: string): Record<string, unknown> {
+  return {
+    id,
+    name,
+    key,
+    value: name,
+    full_value: path,
+    org_id: orgId,
+    assets_amount: 0
+  };
+}
+
 const terminalContext: ResourceContext = {
   siteId,
   userId: identity.userId,
@@ -399,6 +411,7 @@ describe('desktop OAuth authentication lifecycle', () => {
 
   it('sends the category filter through authorized and favorite searches with the filtered favorite total', async () => {
     const secondFavoriteId = '00000000-0000-4000-8000-000000000004';
+    const nodeId = '00000000-0000-4000-8000-000000000005';
     const mysqlAsset = {
       id: assetId,
       name: '账务 MySQL',
@@ -419,14 +432,14 @@ describe('desktop OAuth authentication lifecycle', () => {
     await saveSite(runtime);
     const snapshot = await bootstrap(runtime);
 
-    await expect(runtime.invoke('assets.list', { category: 'database', search: '账务' })).resolves.toEqual({
+    await expect(runtime.invoke('assets.list', { category: 'database', search: '账务', nodeId })).resolves.toEqual({
       assets: [{ id: assetId, name: '账务 MySQL', address: 'mysql.example.test', orgId, protocols: [], category: 'database', type: 'mysql' }],
       total: 1
     });
     await runtime.invoke('preferences.save', {
       preferences: { ...snapshot.preferences, favorites: [assetId, secondFavoriteId] }
     });
-    await expect(runtime.invoke('assets.list', { category: 'database', search: '账务', favoritesOnly: true })).resolves.toMatchObject({
+    await expect(runtime.invoke('assets.list', { category: 'database', search: '账务', nodeId, favoritesOnly: true })).resolves.toMatchObject({
       assets: [{ id: assetId, category: 'database', type: 'mysql' }],
       total: 1
     });
@@ -435,11 +448,166 @@ describe('desktop OAuth authentication lifecycle', () => {
       .map(([url]) => new URL(url as string))
       .filter((url) => pathOf(url.toString()) === '/gateway/api/v1/perms/users/self/assets/');
     expect(assetRequests).toHaveLength(2);
-    expect(assetRequests.map((url) => [url.searchParams.get('category'), url.searchParams.get('search')])).toEqual([
-      ['database', '账务'],
-      ['database', '账务']
+    expect(assetRequests.map((url) => [
+      url.searchParams.get('category'),
+      url.searchParams.get('search'),
+      url.searchParams.get('node_id')
+    ])).toEqual([
+      ['database', '账务', nodeId],
+      ['database', '账务', nodeId]
     ]);
     expect(assetRequests[1]?.searchParams.get('id__in')).toBe(`${assetId},${secondFavoriteId}`);
+  });
+
+  it('filters only documented synthetic root nodes while preserving Core key nesting', async () => {
+    const root = permittedNode('00000000-0000-4000-8000-000000000010', '1', 'Production', '/Default/Production');
+    const child = permittedNode('00000000-0000-4000-8000-000000000011', '1:2', 'Web', '/Default/Production/Web');
+    const grandchild = permittedNode('00000000-0000-4000-8000-000000000012', '1:2:3', 'Frontend', '/Default/Production/Web/Frontend');
+    vault.record = storedSession();
+    oauthNetwork.fetch.mockImplementation(async (url: string) => {
+      if (pathOf(url) === '/gateway/api/v1/perms/users/self/nodes/children/') {
+        return json({
+          count: 4,
+          results: [
+            { id: 'favorite', key: 'favorite', name: 'Favorite' },
+            root,
+            child,
+            grandchild
+          ]
+        });
+      }
+      return defaultCoreResponse(url);
+    });
+
+    const { runtime } = makeRuntime();
+    await saveSite(runtime);
+    await bootstrap(runtime);
+
+    await expect(runtime.invoke('assets.groups', {})).resolves.toEqual({
+      groups: [
+        { id: root.id, key: '1', parentKey: '', name: 'Production', path: '/Default/Production' },
+        { id: child.id, key: '1:2', parentKey: '1', name: 'Web', path: '/Default/Production/Web' },
+        { id: grandchild.id, key: '1:2:3', parentKey: '1:2', name: 'Frontend', path: '/Default/Production/Web/Frontend' }
+      ]
+    });
+    const request = oauthNetwork.fetch.mock.calls
+      .map(([url]) => new URL(url as string))
+      .find((url) => pathOf(url.toString()) === '/gateway/api/v1/perms/users/self/nodes/children/');
+    expect(request?.searchParams.get('key')).toBeNull();
+  });
+
+  it('returns global Core path-search results without loading the full node tree', async () => {
+    const grandchild = permittedNode('00000000-0000-4000-8000-000000000012', '1:2:3', 'Billing', '/Default/Production/Web/Billing');
+    vault.record = storedSession();
+    oauthNetwork.fetch.mockImplementation(async (url: string) => {
+      if (pathOf(url) === '/gateway/api/v1/perms/users/self/nodes/') {
+        return json({ count: 1, results: [grandchild] });
+      }
+      return defaultCoreResponse(url);
+    });
+
+    const { runtime } = makeRuntime();
+    await saveSite(runtime);
+    await bootstrap(runtime);
+
+    await expect(runtime.invoke('assets.groups', { search: 'Billing' })).resolves.toEqual({
+      groups: [
+        { id: grandchild.id, key: '1:2:3', parentKey: '1:2', name: 'Billing', path: '/Default/Production/Web/Billing' }
+      ]
+    });
+    const searches = oauthNetwork.fetch.mock.calls
+      .map(([url]) => new URL(url as string))
+      .filter((url) => pathOf(url.toString()) === '/gateway/api/v1/perms/users/self/nodes/')
+      .map((url) => url.searchParams.get('search'));
+    expect(searches).toEqual(['Billing']);
+  });
+
+  it('keeps the authorized node scope while paging filtered favorites', async () => {
+    const nodeId = '00000000-0000-4000-8000-000000000013';
+    const secondFavoriteId = '00000000-0000-4000-8000-000000000014';
+    const firstAsset = {
+      id: assetId,
+      name: 'App server',
+      address: 'app.example.test',
+      org_id: orgId,
+      category: 'host',
+      type: 'linux'
+    };
+    const secondAsset = {
+      id: secondFavoriteId,
+      name: 'Database server',
+      address: 'db.example.test',
+      org_id: orgId,
+      category: 'host',
+      type: 'linux'
+    };
+    vault.record = storedSession();
+    oauthNetwork.fetch.mockImplementation(async (url: string) => {
+      if (pathOf(url) === '/gateway/api/v1/perms/users/self/assets/') {
+        const request = new URL(url);
+        return json(request.searchParams.get('offset') === '0'
+          ? { count: 2, results: [firstAsset] }
+          : { count: 2, results: [secondAsset] });
+      }
+      return defaultCoreResponse(url);
+    });
+
+    const { runtime } = makeRuntime();
+    await saveSite(runtime);
+    const snapshot = await bootstrap(runtime);
+    await runtime.invoke('preferences.save', {
+      preferences: { ...snapshot.preferences, favorites: [assetId, secondFavoriteId] }
+    });
+
+    await expect(runtime.invoke('assets.list', {
+      nodeId,
+      search: 'server',
+      category: 'host',
+      favoritesOnly: true
+    })).resolves.toEqual({
+      assets: [
+        { id: assetId, name: 'App server', address: 'app.example.test', orgId, protocols: [], category: 'host', type: 'linux' },
+        { id: secondFavoriteId, name: 'Database server', address: 'db.example.test', orgId, protocols: [], category: 'host', type: 'linux' }
+      ],
+      total: 2
+    });
+    const requests = oauthNetwork.fetch.mock.calls
+      .map(([url]) => new URL(url as string))
+      .filter((url) => pathOf(url.toString()) === '/gateway/api/v1/perms/users/self/assets/');
+    expect(requests.map((url) => [
+      url.searchParams.get('id__in'),
+      url.searchParams.get('node_id'),
+      url.searchParams.get('search'),
+      url.searchParams.get('category'),
+      url.searchParams.get('offset')
+    ])).toEqual([
+      [`${assetId},${secondFavoriteId}`, nodeId, 'server', 'host', '0'],
+      [`${assetId},${secondFavoriteId}`, nodeId, 'server', 'host', '1']
+    ]);
+  });
+
+  it('rejects an authorized group response that arrives after identity invalidation', async () => {
+    const pendingResponse = deferred<Response>();
+    vault.record = storedSession();
+    oauthNetwork.fetch.mockImplementation(async (url: string) => {
+      if (pathOf(url) === '/gateway/api/v1/perms/users/self/nodes/children/') return pendingResponse.promise;
+      return defaultCoreResponse(url);
+    });
+
+    const { runtime } = makeRuntime();
+    await saveSite(runtime);
+    await bootstrap(runtime);
+    const groups = runtime.invoke('assets.groups', {});
+    await vi.waitFor(() => expect(oauthNetwork.fetch.mock.calls.some(
+      ([url]) => pathOf(url as string) === '/gateway/api/v1/perms/users/self/nodes/children/'
+    )).toBe(true));
+    await runtime.invoke('auth.logout', {});
+    pendingResponse.resolve(json({
+      count: 1,
+      results: [permittedNode('00000000-0000-4000-8000-000000000015', '1', 'Production', '/Default/Production')]
+    }));
+
+    await expect(groups).rejects.toThrow('认证状态已变更');
   });
 
   it('refreshes after a POST 401 without replaying the connection-token request', async () => {

@@ -3,6 +3,7 @@ export type Phase = 'connecting' | 'active' | 'closed' | 'lost' | 'failed';
 export interface Site { id: string; name: string; url: string }
 export interface Identity { siteId: string; userId: string; name: string; orgId: string }
 export interface Asset { id: string; name: string; address: string; orgId: string; protocols: string[]; category?: string; type?: string; comment?: string }
+export interface AssetGroup { id: string; key: string; parentKey: string; name: string; path: string }
 export interface Account { id: string; name: string; username: string }
 export interface NativeKokoConnectMethodIdentity { value: string; component: 'koko'; type: 'native' }
 export interface ChenWebConnectMethodIdentity { value: 'web_gui'; component: 'chen'; type: 'web' }
@@ -157,7 +158,8 @@ export interface Commands {
   'auth.login': { args: { siteId: string }; result: Identity };
   'auth.cancel': { args: Record<string, never>; result: void };
   'auth.logout': { args: Record<string, never>; result: void };
-  'assets.list': { args: { search?: string; offset?: number; limit?: number; favoritesOnly?: boolean; category?: string }; result: { assets: Asset[]; total: number } };
+  'assets.list': { args: { search?: string; offset?: number; limit?: number; favoritesOnly?: boolean; category?: string; nodeId?: string }; result: { assets: Asset[]; total: number } };
+  'assets.groups': { args: { parentKey?: string; search?: string }; result: { groups: AssetGroup[] } };
   'assets.options': { args: { assetId: string; orgId: string }; result: { accounts: Account[]; methods: ConnectMethod[] } };
   'session.open': { args: { kind: SessionKind; context: ResourceContext }; result: SessionInfo };
   'session.close': { args: { sessionId: string }; result: void };

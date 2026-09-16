@@ -7,12 +7,13 @@ import { terminalMessages } from './locales/terminal';
 import { databaseMessages } from './locales/database';
 import { filesMessages } from './locales/files';
 import { workspaceMessages } from './locales/workspace';
+import { groupMessages } from './locales/groups';
 
 type Locale = 'zh-CN' | 'en-US';
 type Values = Record<string, string | number>;
 const messages: Record<string, string> = {
   ...appMessages, ...settingsMessages, ...terminalMessages,
-  ...databaseMessages, ...filesMessages, ...workspaceMessages
+  ...databaseMessages, ...filesMessages, ...workspaceMessages, ...groupMessages
 };
 
 function systemLocale(): Locale {

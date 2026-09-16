@@ -6,20 +6,24 @@ import type { Session as ElectronSession } from 'electron';
 import { Client } from 'ssh2';
 import { z } from 'zod';
 import {
+  assetsGroupsArgsSchema,
   assetsListArgsSchema,
   assetsOptionsArgsSchema,
   authLoginArgsSchema,
   emptyArgsSchema,
+  isSyntheticPermittedNode,
   parseApiError,
   parseConnectionToken,
   parseContext,
   parseIdentity,
   parsePaginatedAssets,
+  parsePaginatedNodes,
   parsePermittedAsset,
   preferencesSchema,
   siteRemoveArgsSchema,
   toAccounts,
   toAsset,
+  toAssetGroup,
   toDesktopConnectMethods
 } from '../../../../packages/adapters-jumpserver/src/core/schemas';
 import type { DesktopConnectMethods, PermittedAsset } from '../../../../packages/adapters-jumpserver/src/core/schemas';
@@ -36,6 +40,7 @@ import type { StoredOAuthSession } from './oauth-storage';
 import type {
   AppEvent,
   Asset,
+  AssetGroup,
   Identity,
   Preferences,
   ResourceContext,
@@ -49,9 +54,12 @@ import type {
 const PROFILE_PATH = '/api/v1/users/profile/';
 const CURRENT_ORG_PATH = '/api/v1/orgs/orgs/current/';
 const PERMITTED_ASSETS_PATH = '/api/v1/perms/users/self/assets/';
+const PERMITTED_NODES_PATH = '/api/v1/perms/users/self/nodes/';
+const PERMITTED_NODE_CHILDREN_PATH = '/api/v1/perms/users/self/nodes/children/';
 const CONNECT_METHODS_PATH = '/api/v1/terminal/components/connect-methods/';
 const CONNECTION_TOKEN_PATH = '/api/v1/authentication/connection-token/';
 const SMART_ENDPOINT_PATH = '/api/v1/terminal/endpoints/smart/';
+const PERMITTED_NODES_PAGE_LIMIT = 1_000;
 const SSH_READY_TIMEOUT_MS = 20_000;
 const MAX_CLIENT_URL_BYTES = 64 * 1024;
 
@@ -60,6 +68,8 @@ const apiMethods: Readonly<Record<string, Readonly<Record<string, true>>>> = {
   '/api/v1/users/profile/permissions/': { GET: true },
   [CURRENT_ORG_PATH]: { GET: true },
   [PERMITTED_ASSETS_PATH]: { GET: true },
+  [PERMITTED_NODES_PATH]: { GET: true },
+  [PERMITTED_NODE_CHILDREN_PATH]: { GET: true },
   [CONNECT_METHODS_PATH]: { GET: true },
   [CONNECTION_TOKEN_PATH]: { POST: true },
   [SMART_ENDPOINT_PATH]: { GET: true }
@@ -410,6 +420,67 @@ export function createAuthRuntime(options: CreateAuthRuntimeOptions): {
   const readAssetDetail = async (state: AuthenticatedNetworkState, assetId: string, orgId: string) => {
     const payload = await requestJson(state, `${PERMITTED_ASSETS_PATH}${encodeURIComponent(assetId)}/`, { orgId });
     return parsePermittedAsset(payload);
+  };
+
+  const addPermittedGroup = (groups: Map<string, AssetGroup>, value: unknown, orgId: string): boolean => {
+    if (isSyntheticPermittedNode(value)) return false;
+    const group = toAssetGroup(value, orgId);
+    const current = groups.get(group.key);
+    if (!current) {
+      groups.set(group.key, group);
+      return true;
+    }
+    if (
+      current.id !== group.id ||
+      current.parentKey !== group.parentKey ||
+      current.name !== group.name ||
+      current.path !== group.path
+    ) {
+      throw new Error('Core 返回了键冲突的授权资产组');
+    }
+    return false;
+  };
+
+  const listPermittedGroups = async (
+    state: AuthenticatedNetworkState,
+    requestEpoch: number,
+    path: string,
+    query: Record<string, string>
+  ): Promise<Map<string, AssetGroup>> => {
+    const groups = new Map<string, AssetGroup>();
+    let offset = 0;
+    let expectedTotal: number | undefined;
+    let paginated: boolean | undefined;
+
+    for (;;) {
+      const payload = await requestJson(state, path, {
+        query: {
+          ...query,
+          offset: String(offset),
+          limit: String(PERMITTED_NODES_PAGE_LIMIT)
+        }
+      });
+      assertCurrentEpoch(requestEpoch);
+      const page = parsePaginatedNodes(payload);
+      if (paginated === undefined) paginated = page.paginated;
+      else if (paginated !== page.paginated) throw new Error('Core 授权资产组分页响应格式不一致');
+
+      if (!page.paginated && offset !== 0) throw new Error('Core 授权资产组未返回完整列表');
+      if (expectedTotal === undefined) expectedTotal = page.total;
+      else if (expectedTotal !== page.total) throw new Error('Core 授权资产组总数在分页期间发生变化');
+      if (page.values.length > expectedTotal - offset) throw new Error('Core 返回了超出授权资产组总数的分页结果');
+
+      let added = false;
+      for (const value of page.values) added = addPermittedGroup(groups, value, state.identity.orgId) || added;
+
+      if (!page.paginated) return groups;
+      if (page.values.length === 0 && offset < expectedTotal) throw new Error('Core 未提供完整的授权资产组分页结果，请刷新重试');
+      if (offset !== 0 && !added && page.values.length !== 0 && offset < expectedTotal) {
+        throw new Error('Core 未按请求分页返回授权资产组，请刷新重试');
+      }
+      offset += page.values.length;
+      if (offset === expectedTotal) return groups;
+    }
   };
 
   const allowedMethodFor = (
@@ -970,6 +1041,7 @@ export function createAuthRuntime(options: CreateAuthRuntimeOptions): {
                 'id__in': batch.join(','),
                 ...(input.search ? { search: input.search } : {}),
                 ...(input.category ? { category: input.category } : {}),
+                ...(input.nodeId ? { node_id: input.nodeId } : {}),
                 offset: String(offset),
                 limit: '100',
                 ordering: 'name'
@@ -995,6 +1067,7 @@ export function createAuthRuntime(options: CreateAuthRuntimeOptions): {
         query: {
           ...(input.search ? { search: input.search } : {}),
           ...(input.category ? { category: input.category } : {}),
+          ...(input.nodeId ? { node_id: input.nodeId } : {}),
           offset: String(input.offset ?? 0),
           limit: String(input.limit ?? 50),
           ordering: 'name'
@@ -1003,6 +1076,23 @@ export function createAuthRuntime(options: CreateAuthRuntimeOptions): {
       assertCurrentEpoch(requestEpoch);
       const page = parsePaginatedAssets(payload);
       return { assets: page.values.map(toAsset), total: page.total };
+    }
+    if (parsedCommand === 'assets.groups') {
+      const input = assetsGroupsArgsSchema.parse(args);
+      const state = currentState();
+      const requestEpoch = state.epoch;
+      if (!input.search) {
+        const groups = await listPermittedGroups(
+          state,
+          requestEpoch,
+          PERMITTED_NODE_CHILDREN_PATH,
+          input.parentKey ? { key: input.parentKey } : {}
+        );
+        return { groups: [...groups.values()] };
+      }
+
+      const groups = await listPermittedGroups(state, requestEpoch, PERMITTED_NODES_PATH, { search: input.search });
+      return { groups: [...groups.values()] };
     }
     if (parsedCommand === 'assets.options') {
       const input = assetsOptionsArgsSchema.parse(args);

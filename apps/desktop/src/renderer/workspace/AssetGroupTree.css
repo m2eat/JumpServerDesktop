@@ -1,0 +1,27 @@
+.asset-group-tree { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; padding: 17px 0 12px; }
+.group-tree-header { display: flex; align-items: center; gap: 2px; flex-shrink: 0; margin-bottom: 7px; padding: 0 4px; color: var(--muted); }
+.group-tree-title { display: flex; align-items: center; flex: 1; min-width: 0; gap: 6px; padding: 5px 0; color: var(--muted); background: transparent; font-size: 11px; font-weight: 600; }
+.group-header-action { display: grid; place-items: center; flex-shrink: 0; width: 24px; height: 24px; padding: 0; color: var(--muted); background: transparent; border-radius: 4px; }
+.group-header-action:hover, .group-disclosure:hover { background: var(--hover); color: var(--text); }
+.group-tree-scroll { overflow: auto; flex: 1; min-height: 0; padding: 2px; }
+.asset-group-row { display: flex; align-items: center; min-width: 0; min-height: 32px; margin: 1px 0; padding-right: 5px; border-radius: 6px; color: var(--muted); }
+.asset-group-row:hover { background: var(--hover); color: var(--text); }
+.asset-group-row.is-selected, .group-search-result.is-selected { color: var(--text); background: var(--selected); }
+.asset-group-tree [role="treeitem"]:focus-visible { outline: none; }
+.asset-group-tree [role="treeitem"]:focus-visible > .asset-group-row { outline: 1px solid var(--accent); outline-offset: -1px; }
+.group-disclosure, .group-disclosure-space { display: grid; place-items: center; flex: 0 0 20px; width: 20px; height: 26px; padding: 0; color: var(--muted); background: transparent; border-radius: 4px; }
+.group-name { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; height: 32px; padding: 0 3px; color: inherit; background: transparent; border-radius: 4px; text-align: left; font-size: 12px; }
+.group-name > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-name > svg { flex-shrink: 0; opacity: .8; }
+.group-search { display: flex; align-items: center; gap: 6px; flex-shrink: 0; height: 30px; margin: 0 3px 7px; padding: 0 7px; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--raised); color: var(--muted); }
+.group-search .input { flex: 1; min-width: 0; height: 100%; padding: 0; background: transparent; border: 0; font-size: 11px; }
+.group-status { margin: 0; padding: 10px 8px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.group-inline-error { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 5px; margin: 4px; padding: 7px; color: var(--danger-text); background: var(--danger-soft); border-radius: 5px; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.group-inline-error > span { flex: 1 1 120px; min-width: 0; }
+.group-inline-error button { padding: 1px 4px; background: transparent; color: inherit; font-size: 11px; text-decoration: underline; }
+.group-search-results { display: grid; gap: 3px; }
+.group-search-result { display: flex; align-items: center; gap: 8px; min-width: 0; width: 100%; padding: 8px; color: var(--muted); background: transparent; border-radius: 6px; text-align: left; }
+.group-search-result:hover { background: var(--hover); }
+.group-search-result > span { display: grid; min-width: 0; flex: 1; gap: 3px; }
+.group-search-result strong { font-size: 12px; font-weight: 500; color: var(--text); }
+.group-search-result small { font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }

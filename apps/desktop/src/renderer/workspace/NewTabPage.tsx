@@ -83,8 +83,8 @@ export function NewTabPage({ recent, siteName, onConnect, onSearch, onBrowseHost
         <form className="new-tab-search input-frame" role="search" onSubmit={onSubmit}>
           <Search size={18} aria-hidden="true" />
           <Input
-            aria-label={t('搜索授权主机')}
-            placeholder={t('搜索主机、账户或地址')}
+            aria-label={t('搜索授权资产')}
+            placeholder={t('搜索资产、账户或地址')}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={onSearchKeyDown}
@@ -101,10 +101,10 @@ export function NewTabPage({ recent, siteName, onConnect, onSearch, onBrowseHost
           {recent.length === 0 ? (
             <div className="new-tab-recents-empty">
               <p>{t('还没有最近连接。')}</p>
-              <Button className="app-action new-tab-browse-host" type="button" variant="secondary" onPress={onBrowseHosts}><MonitorUp size={15} aria-hidden="true" />{t('浏览主机')}</Button>
+              <Button className="app-action new-tab-browse-host" type="button" variant="secondary" onPress={onBrowseHosts}><MonitorUp size={15} aria-hidden="true" />{t('浏览资产')}</Button>
             </div>
           ) : matchingRecent.length === 0 ? (
-            <div className="new-tab-recents-no-match" role="status">{t('最近连接中没有匹配项。按 Enter 搜索全部已授权主机。')}</div>
+            <div className="new-tab-recents-no-match" role="status">{t('最近连接中没有匹配项。按 Enter 搜索全部已授权资产。')}</div>
           ) : (
             <div className="new-tab-recent-list">
               {matchingRecent.map((context) => {

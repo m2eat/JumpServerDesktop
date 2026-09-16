@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { Button, Input, ListBox, Modal, Select } from '@heroui/react';
 import Editor from '@monaco-editor/react';
@@ -10,9 +10,10 @@ import {
   ChevronRight,
   Copy,
   Database,
-  FilePlus2,
   Folder,
   LoaderCircle,
+  Maximize2,
+  Minimize2,
   PanelLeftClose,
   Pencil,
   Play,
@@ -162,6 +163,7 @@ type DraftDiscardAction =
   | { kind: 'execute'; selectionOnly: boolean }
   | { kind: 'table'; node: DbNode; page: number; limit: 50 | 100 | 200 | 500; search?: TableSearch }
   | { kind: 'clear' }
+  | { kind: 'refresh' }
   | { kind: 'reload' };
 
 
@@ -258,6 +260,94 @@ function nodeIcon(node: DbNode): ReactNode {
   }
 }
 
+interface DatabaseResultRowProps {
+  row: DbCell[];
+  rowIndex: number;
+  columns: QueryResult['columns'];
+  values: Record<string, DbWriteValue> | undefined;
+  deleted: boolean;
+  hasActions: boolean;
+  canUpdateOrDelete: boolean;
+  disabled: boolean;
+  editor: CellEditor | null;
+  expandedCells: ReadonlySet<string>;
+  onEdit: (target: CellEditor['target'], rowIndex: number, column: string, value?: DbWriteValue) => void;
+  onUpdate: (rowIndex: number, column: string, value: DbWriteValue) => void;
+  onDelete: (rowIndex: number) => void;
+  onCancel: () => void;
+  onExpand: (cellKey: string) => void;
+  onCopy: (text: string, confirmation: string) => Promise<void>;
+}
+
+// Unrelated toolbar/sheet state must not re-render thousands of cell controls.
+const DatabaseResultRow = memo(function DatabaseResultRow({
+  row, rowIndex, columns, values, deleted, hasActions, canUpdateOrDelete,
+  disabled, editor, expandedCells, onEdit, onUpdate, onDelete, onCancel, onExpand, onCopy
+}: DatabaseResultRowProps) {
+  const { t } = useI18n();
+  const [hoveredColumn, setHoveredColumn] = useState<string | null>(null);
+  const [focusedColumn, setFocusedColumn] = useState<string | null>(null);
+  return (
+    <tr className={deleted ? 'db-row-deleted' : ''}>
+      {hasActions && (
+        <td className="db-grid-actions">
+          {canUpdateOrDelete && <button aria-label={deleted ? t('撤销删除草稿') : t('将此行加入删除草稿（不会执行 SQL）')} disabled={disabled} type="button" onClick={() => onDelete(rowIndex)} title={deleted ? t('撤销删除草稿') : t('将此行加入删除草稿（不会执行 SQL）')}>
+            {deleted ? <RotateCcw size={14} /> : <Trash2 size={14} />}
+          </button>}
+        </td>
+      )}
+      {columns.map((column, columnIndex) => {
+        const original = row[columnIndex] ?? null;
+        const value = values && hasOwnValue(values, column.name) ? values[column.name]! : original;
+        const cellKey = `${rowIndex}:${column.name}`;
+        const isExpanded = expandedCells.has(cellKey);
+        const isEditing = editor?.column === column.name;
+        const editable = canUpdateOrDelete && column.editable && !column.primaryKey && !column.generated && !column.autoIncrement && !deleted;
+        const long = typeof value === 'string' && value.length > 140;
+        const showActions = hoveredColumn === column.name || focusedColumn === column.name;
+        return (
+          <td key={column.name} className={`${value === null ? 'db-null-cell' : ''}${isDefaultValue(value) ? ' db-default-cell' : ''}`}>
+            {isEditing && editor !== null ? (
+              <DatabaseCellEditor
+                key={`update:${rowIndex}:${column.name}`}
+                column={column}
+                initialValue={editor.initialValue}
+                allowOmit={false}
+                disabled={disabled}
+                onSave={(nextValue) => { if (nextValue !== undefined) onUpdate(rowIndex, column.name, nextValue); }}
+                onCancel={onCancel}
+                onRevert={() => onUpdate(rowIndex, column.name, original)}
+              />
+            ) : (
+              <div
+                className={`db-cell ${isExpanded ? 'db-cell-expanded' : ''}`}
+                tabIndex={editable ? undefined : 0}
+                onMouseEnter={() => setHoveredColumn(column.name)}
+                onMouseLeave={() => setHoveredColumn(null)}
+                onFocusCapture={() => setFocusedColumn(column.name)}
+                onBlurCapture={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusedColumn(null);
+                }}
+              >
+                {editable
+                  ? <button className="db-cell-value db-cell-value-editable" type="button" disabled={disabled} onDoubleClick={() => onEdit('update', rowIndex, column.name, value)} title={t('双击编辑本地变更草稿；不会执行 SQL')}>{displayValueText(value, t('未设置'), t('空字符串'))}</button>
+                  : <span className="db-cell-value">{displayValueText(value, t('未设置'), t('空字符串'))}</span>}
+                {long && <button className="db-cell-expand" type="button" onClick={() => onExpand(cellKey)}>{isExpanded ? t('收起') : t('展开')}</button>}
+                <span className={`db-cell-actions${editable ? ' db-cell-actions-editable' : ''}`}>
+                  {showActions && <>
+                    {editable && <button className="db-cell-draft" aria-label={t('编辑 {{column}}', { column: column.name })} disabled={disabled} type="button" onClick={() => onEdit('update', rowIndex, column.name, value)} title={t('双击编辑本地变更草稿；不会执行 SQL')}><Pencil size={13} /></button>}
+                    <button className="db-cell-copy" aria-label={t('复制 {{column}} 的精确值', { column: column.name })} type="button" onClick={() => void onCopy(valueText(value), t('已复制精确单元格值。'))} title={t('复制精确值')}><Copy size={13} /></button>
+                  </>}
+                </span>
+              </div>
+            )}
+          </td>
+        );
+      })}
+    </tr>
+  );
+});
+
 export default function DatabasePane({ session, preferences, onDirtyChange, onReconnect, reconnecting = false }: DatabasePaneProps) {
   const { t } = useI18n();
   const theme = useTheme(preferences.theme);
@@ -295,8 +385,8 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
 
   const editor = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
   const saveButton = useRef<HTMLButtonElement | null>(null);
-  const previewDialog = useRef<HTMLDivElement | null>(null);
-  const previewCancel = useRef<HTMLButtonElement | null>(null);
+  const sheetDialog = useRef<HTMLDivElement | null>(null);
+  const sheetClose = useRef<HTMLButtonElement | null>(null);
   const treeRequestEpochs = useRef(new Map<string, number>());
   const treeSessionEpoch = useRef(0);
   const currentSession = useRef(sessionKey);
@@ -334,7 +424,8 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
   const [expandedCells, setExpandedCells] = useState<Set<string>>(() => new Set());
   const [cellEditor, setCellEditor] = useState<CellEditor | null>(null);
   const [draft, setDraft] = useState<TableDraft>(newDraft);
-  const [changePanelOpen, setChangePanelOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetExpanded, setSheetExpanded] = useState(false);
   const [discardAction, setDiscardAction] = useState<DraftDiscardAction | null>(null);
   const [tableSearchText, setTableSearchText] = useState('');
   const [tableSearchColumn, setTableSearchColumn] = useState('');
@@ -371,8 +462,8 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
   const tableDraftDirty = draftCount > 0 || cellEditor !== null || previewing || applying || writeFrozen || requiresBaseline;
   const databaseDirty = !sessionChanged && (sql !== initialSql || tableDraftDirty || running);
   const previewExpired = preview !== null && preview.expiresAt <= previewClock;
-  const previewOpen = preview !== null;
-  const sqlCrudReason = session.capabilities.sqlCrud?.reason || t('Chen 未声明 SQL CRUD 能力；当前表结果元数据决定是否可编辑。');
+  const sheetContentAvailable = preview !== null || applyReport !== null;
+  const sheetVisible = sheetOpen && sheetContentAvailable;
 
   useEffect(() => {
     if (!preview) return;
@@ -381,21 +472,20 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
   }, [preview]);
 
   useEffect(() => {
-    if (!previewOpen) return;
-    const dialog = previewDialog.current;
-    const frame = window.requestAnimationFrame(() => previewCancel.current?.focus({ preventScroll: true }));
+    if (!sheetVisible) return;
+    const dialog = sheetDialog.current;
+    const frame = window.requestAnimationFrame(() => sheetClose.current?.focus({ preventScroll: true }));
     return () => {
       window.cancelAnimationFrame(frame);
       if (document.activeElement === document.body || dialog?.contains(document.activeElement)) {
         saveButton.current?.focus({ preventScroll: true });
       }
     };
-  }, [previewOpen]);
-
-  const closePreview = () => {
+  }, [applyReport, preview, sheetVisible]);
+  const closeSheet = () => {
     if (applying) return;
-    invalidatePreview();
-    setNotice('');
+    setSheetOpen(false);
+    setSheetExpanded(false);
   };
 
   useEffect(() => {
@@ -472,7 +562,8 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
     setDraft(newDraft());
     setCellEditor(null);
     setExpandedCells(new Set());
-    setChangePanelOpen(false);
+    setSheetOpen(false);
+    setSheetExpanded(false);
     setDiscardAction(null);
     setTableSearchText('');
     setTableSearchColumn('');
@@ -653,6 +744,11 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
     setCancelling(false);
     setError('');
     setNotice(translate('正在通过 Chen data_view 打开 {{schema}}.{{table}}…', { schema: node.schema, table: node.table }));
+    if (preserveReport) {
+      setApplyReport((current) => current?.result.outcome === 'committed'
+        ? { ...current, refresh: 'pending' }
+        : current);
+    }
     try {
       const payload = await bridge().invoke('db.table', {
         sessionId: session.id,
@@ -673,18 +769,27 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
       if (!writeFrozen) {
         setDraft(newDraft());
         setCellEditor(null);
-        if (!preserveReport) {
+        if (preserveReport) {
+          setBaselineAcknowledged(true);
+          setApplyReport((current) => current?.result.outcome === 'committed'
+            ? { ...current, refresh: 'refreshed' }
+            : current);
+        } else {
           setApplyReport(null);
           setBaselineAcknowledged(false);
         }
       }
-      setExpandedCells(new Set());
       setNotice(parsed.message);
     } catch (cause) {
       if (currentSession.current !== requestSession || activeDataOperation.current !== operation) {
         return;
       }
       setNotice('');
+      if (preserveReport) {
+        setApplyReport((current) => current?.result.outcome === 'committed'
+          ? { ...current, refresh: 'failed' }
+          : current);
+      }
       setError(errorText(cause, translate('无法通过 Chen 打开表浏览。')));
     } finally {
       if (currentSession.current === requestSession && activeDataOperation.current === operation) {
@@ -719,15 +824,21 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
       setDiscardAction({ kind: 'table', node, page, limit, search });
       return;
     }
-    void openTable(node, page, limit, search);
-  }, [canUseDatabase, dataBusy, defaultPageSize, openTable, tableDraftDirty, writeFrozen]);
+    const preserveReport = Boolean(
+      applyReport
+      && activeTable
+      && activeTable.schema === node.schema
+      && activeTable.table === node.table
+    );
+    void openTable(node, page, limit, search, preserveReport);
+  }, [activeTable, applyReport, canUseDatabase, dataBusy, defaultPageSize, openTable, tableDraftDirty, writeFrozen]);
 
   const confirmDraftDiscard = () => {
     if (discardAction === null || dataBusy || activeDataOperation.current !== null) {
       return;
     }
     const action = discardAction;
-    if (action.kind === 'reload' && !activeTable) {
+    if ((action.kind === 'reload' || action.kind === 'refresh') && !activeTable) {
       return;
     }
     invalidatePreview();
@@ -742,17 +853,37 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
       void openTable(action.node, action.page, action.limit, action.search);
       return;
     }
-    if (action.kind === 'reload' && activeTable) {
-      setBaselineAcknowledged(true);
+    if ((action.kind === 'reload' || action.kind === 'refresh') && activeTable) {
       void openTable(
         { key: '', name: activeTable.table, kind: 'table', leaf: true, schema: activeTable.schema, table: activeTable.table },
         activeTable.page,
         activeTable.limit,
         activeTable.search,
-        true
+        action.kind === 'reload'
       );
     }
   };
+
+  const requestTableRefresh = useCallback(() => {
+    if (!activeTable || !canUseDatabase || dataBusy || activeDataOperation.current !== null) {
+      return;
+    }
+    if (requiresBaseline) {
+      setDiscardAction({ kind: 'reload' });
+      return;
+    }
+    if (tableDraftDirty && !writeFrozen) {
+      setDiscardAction({ kind: 'refresh' });
+      return;
+    }
+    void openTable(
+      { key: '', name: activeTable.table, kind: 'table', leaf: true, schema: activeTable.schema, table: activeTable.table },
+      activeTable.page,
+      activeTable.limit,
+      activeTable.search,
+      Boolean(applyReport)
+    );
+  }, [activeTable, applyReport, canUseDatabase, dataBusy, openTable, requiresBaseline, tableDraftDirty, writeFrozen]);
 
   const changePage = useCallback((page: number, limit = activeTable?.limit) => {
     if (!activeTable || !result) {
@@ -843,10 +974,17 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
     setCellEditor(null);
   }, [activeTable, activeTableResult, canUpdateOrDelete, dataBusy, invalidatePreview, requiresBaseline, writeFrozen]);
 
-  const draftValue = (rowIndex: number, column: string, original: DbCell): DbWriteValue => {
-    const update = draft.updates.find((item) => item.rowIndex === rowIndex);
-    return update && hasOwnValue(update.values, column) ? update.values[column]! : original;
-  };
+  const draftValuesByRow = useMemo(() => new Map(draft.updates.map((update) => [update.rowIndex, update.values])), [draft.updates]);
+  const deletedRows = useMemo(() => new Set(draft.deletes.map((deleted) => deleted.rowIndex)), [draft.deletes]);
+  const cancelCellEdit = useCallback(() => setCellEditor(null), []);
+  const toggleExpandedCell = useCallback((cellKey: string) => {
+    setExpandedCells((current) => {
+      const next = new Set(current);
+      if (next.has(cellKey)) next.delete(cellKey);
+      else next.add(cellKey);
+      return next;
+    });
+  }, []);
 
   const copyText = useCallback(async (text: string, confirmation: string) => {
     try {
@@ -865,7 +1003,6 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
     setApplyReport(null);
     setBaselineAcknowledged(false);
     setDraft((current) => ({ ...current, inserts: [...current.inserts, {}] }));
-    setChangePanelOpen(true);
   }, [canInsert, dataBusy, invalidatePreview, requiresBaseline, writeFrozen]);
 
   const updateInsertDraft = useCallback((insertIndex: number, column: string, value: DbWriteValue | undefined) => {
@@ -902,7 +1039,7 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
     setApplyReport(null);
     setBaselineAcknowledged(false);
     setDraft((current) => ({ ...current, inserts: current.inserts.filter((_, index) => index !== insertIndex) }));
-    setCellEditor((current) => current?.target === 'insert' && current.rowIndex === insertIndex ? null : current);
+    setCellEditor((current) => current?.target === 'insert' ? null : current);
   }, [canInsert, dataBusy, invalidatePreview, requiresBaseline, writeFrozen]);
 
   const markDeleted = useCallback((rowIndex: number) => {
@@ -925,28 +1062,20 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
         deletes: [...current.deletes, { rowIndex, row }]
       });
     setCellEditor((current) => current?.target === 'update' && current.rowIndex === rowIndex ? null : current);
-    setChangePanelOpen(true);
   }, [activeTableResult, canUpdateOrDelete, dataBusy, invalidatePreview, requiresBaseline, writeFrozen]);
 
-  const beginCellEdit = useCallback((target: CellEditor['target'], rowIndex: number, column: string, original?: DbCell) => {
+  const beginCellEdit = useCallback((target: CellEditor['target'], rowIndex: number, column: string, initialValue?: DbWriteValue) => {
     if (dataBusy || activeDataOperation.current !== null || writeFrozen || requiresBaseline) {
       return;
-    }
-    let currentValue: DbWriteValue | undefined;
-    if (target === 'update') {
-      currentValue = draftValue(rowIndex, column, original ?? null);
-    } else {
-      const insert = draft.inserts[rowIndex];
-      currentValue = insert && hasOwnValue(insert, column) ? insert[column] : undefined;
     }
     invalidatePreview();
     setCellEditor({
       target,
       rowIndex,
       column,
-      initialValue: currentValue
+      initialValue
     });
-  }, [dataBusy, draft.inserts, draftValue, invalidatePreview, requiresBaseline, writeFrozen]);
+  }, [dataBusy, invalidatePreview, requiresBaseline, writeFrozen]);
 
   const requestPreview = useCallback(async () => {
     if (!canUseDatabase || dataBusy || activeDataOperation.current !== null || !changes || draftCount === 0 || writeFrozen || requiresBaseline) {
@@ -961,7 +1090,6 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
       for (const column of activeTableResult?.columns || []) {
         const issue = validateDbWriteValue(column, hasOwnValue(insert, column.name) ? insert[column.name] : undefined, true);
         if (issue) {
-          setChangePanelOpen(true);
           setError(translate('新增第 {{index}} 行，字段 {{column}}：{{message}}', { index: index + 1, column: column.name, message: translateDiagnostic(issue) }));
           return;
         }
@@ -994,6 +1122,7 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
       }
       setPreview(freezePreview(parsed, previewChanges, activeTable?.search));
       setPreviewClock(Date.now());
+      setSheetOpen(true);
       setApplyReport(null);
       setBaselineAcknowledged(false);
       setNotice('');
@@ -1045,12 +1174,8 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
       }
       if (parsed.outcome !== 'committed') {
         setApplyReport({ preview: submittedPreview, result: parsed, refresh: 'not-needed' });
-        if (parsed.outcome === 'unknown') {
-          setWriteFrozen(true);
-          setNotice(translate('提交终态未知：本会话的表格写入已冻结。请重新连接后核验数据库，绝不重复提交。'));
-        } else {
-          setNotice(translate('提交未完整完成；草稿和 SQL 报告已保留。请丢弃草稿并重新读取，建立新基线后再操作。'));
-        }
+        if (parsed.outcome === 'unknown') setWriteFrozen(true);
+        setNotice('');
         return;
       }
       setDraft(newDraft());
@@ -1132,6 +1257,11 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
         || (tableSearchText.length > 0 && tableSearchColumn !== (appliedSearch?.column || ''))
       )
   );
+  const gridHasActions = canUpdateOrDelete || canInsert;
+  const partialFailedCount = applyReport?.result.outcome === 'partial' && applyReport.result.failedIndex !== undefined ? 1 : 0;
+  const partialNotExecuted = applyReport?.result.outcome === 'partial'
+    ? Math.max(0, applyReport.result.total - applyReport.result.applied - partialFailedCount)
+    : 0;
   const reviewedValueText = (value: DbWriteValue | undefined): string => {
     if (value === undefined) return t('未设置');
     if (isDefaultValue(value)) return 'DEFAULT';
@@ -1293,12 +1423,12 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
           <span>{discardAction.kind === 'clear'
             ? t('将永久清空当前表的所有本地变更草稿。')
             : discardAction.kind === 'reload'
-              ? t('将丢弃未完整提交后的草稿，并从 Chen 重新读取该表来建立新基线。')
+              ? t('将放弃未保存的修改并刷新表格；提交报告会保留。')
               : discardAction.kind === 'table' && discardAction.search
                 ? t('将丢弃当前表的所有本地变更草稿，并将服务器端搜索应用为 {{column}} 包含 {{text}}。', { column: discardAction.search.column || t('全部列'), text: JSON.stringify(discardAction.search.text) })
                 : t('继续操作会丢弃当前表的所有本地变更草稿；数据库和 Chen 均不会收到这些草稿。')}</span>
           <Button type="button" variant="tertiary" onPress={() => setDiscardAction(null)}>{t('保留草稿')}</Button>
-          <Button className="db-discard-confirmation__confirm" type="button" variant="primary" onPress={confirmDraftDiscard}>{discardAction.kind === 'reload' ? t('丢弃并重新读取') : t('放弃草稿并继续')}</Button>
+          <Button className="db-discard-confirmation__confirm" type="button" variant="primary" onPress={confirmDraftDiscard}>{discardAction.kind === 'reload' || discardAction.kind === 'refresh' ? t('丢弃并重新读取') : t('放弃草稿并继续')}</Button>
         </div>
       )}
       {session.phase !== 'active' && (
@@ -1325,6 +1455,14 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
           </div>
           {activeTable && (
             <div className="db-results-controls">
+              <div className="db-table-actions">
+                <Button aria-label={t('刷新表格')} isDisabled={!canUseDatabase || dataBusy} type="button" variant="tertiary" onPress={requestTableRefresh} render={(buttonProps) => <button {...buttonProps} title={t('刷新表格')} />}>
+                  <RefreshCw className={running ? 'db-spin' : ''} size={14} />{t('刷新')}
+                </Button>
+                {canInsert && <Button isDisabled={dataBusy || writeFrozen || requiresBaseline} type="button" variant="secondary" onPress={createInsertDraft}>
+                  <Plus size={14} />{t('新建记录')}
+                </Button>}
+              </div>
               <div className="db-table-search input-frame">
                 <Search size={14} aria-hidden="true" />
                 <Input
@@ -1386,6 +1524,9 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
                 : t('未应用表搜索；当前行来自未筛选的服务器端结果。')}
           </div>
         )}
+        {activeTable && !canUpdateOrDelete && !canInsert && activeTableResult?.readonlyReason && (
+          <div className="db-table-readonly" role="status"><AlertTriangle size={14} /><span>{activeTableResult.readonlyReason}</span></div>
+        )}
         {result?.source === 'query' && (
           <div className="db-crud-blocked">
             <AlertTriangle size={15} />
@@ -1402,7 +1543,7 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
             <table className="db-grid">
               <thead>
                 <tr>
-                  {canUpdateOrDelete && <th className="db-grid-actions">{t('草稿')}</th>}
+                  {gridHasActions && <th className="db-grid-actions">{t('操作')}</th>}
                   {displayColumns.map((column) => (
                     <th key={column.name} title={[
                       column.primaryKey && t('主键不可编辑'),
@@ -1412,285 +1553,235 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
                       column.insertable && t('可新增'),
                       column.nullable && t('允许 NULL'),
                       column.hasDefault && t('支持 DEFAULT')
-                    ].filter(Boolean).join('；')}>
+                    ].filter(Boolean).join('；') || undefined}>
                       <span>{column.name}</span>
-                      <small>{[
-                        column.type,
-                        column.primaryKey && 'PK',
-                        column.generated && t('生成'),
-                        column.autoIncrement && t('自增'),
-                        column.editable && t('可更新'),
-                        column.insertable && t('可新增')
-                      ].filter(Boolean).join(' · ')}</small>
+                      <small>{column.type}</small>
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {displayRows.map((row, rowIndex) => {
-                  const rowDeleted = draft.deletes.some((item) => item.rowIndex === rowIndex);
-                  return (
-                    <tr key={`${activeTable?.page || 'query'}-${rowIndex}`} className={rowDeleted ? 'db-row-deleted' : ''}>
-                      {canUpdateOrDelete && (
-                        <td className="db-grid-actions">
-                          <Button aria-label={rowDeleted ? t('撤销删除草稿') : t('将此行加入删除草稿（不会执行 SQL）')} isDisabled={dataBusy || writeFrozen || requiresBaseline} isIconOnly type="button" variant="tertiary"  onPress={() => markDeleted(rowIndex)} render={(buttonProps) => <button {...buttonProps} title={rowDeleted ? t('撤销删除草稿') : t('将此行加入删除草稿（不会执行 SQL）')} />} > {rowDeleted ? <RotateCcw size={14} /> : <Trash2 size={14} />}</Button>
+                {displayRows.map((row, rowIndex) => (
+                  <DatabaseResultRow
+                    key={`${activeTable?.page || 'query'}-${rowIndex}`}
+                    row={row}
+                    rowIndex={rowIndex}
+                    columns={displayColumns}
+                    values={activeTable ? draftValuesByRow.get(rowIndex) : undefined}
+                    deleted={deletedRows.has(rowIndex)}
+                    hasActions={gridHasActions}
+                    canUpdateOrDelete={canUpdateOrDelete}
+                    disabled={!canUseDatabase || dataBusy || writeFrozen || requiresBaseline}
+                    editor={cellEditor?.target === 'update' && cellEditor.rowIndex === rowIndex ? cellEditor : null}
+                    expandedCells={expandedCells}
+                    onEdit={beginCellEdit}
+                    onUpdate={updateDraft}
+                    onDelete={markDeleted}
+                    onCancel={cancelCellEdit}
+                    onExpand={toggleExpandedCell}
+                    onCopy={copyText}
+                  />
+                ))}
+                {activeTable && draft.inserts.map((insert, insertIndex) => (
+                  <tr className="db-row-insert" key={`insert-${insertIndex}`}>
+                    {gridHasActions && <td className="db-grid-actions"><button aria-label={t('移除此新增草稿')} disabled={dataBusy || writeFrozen || requiresBaseline} type="button" onClick={() => removeInsertDraft(insertIndex)} title={t('移除此新增草稿')}><Trash2 size={14} /></button></td>}
+                    {displayColumns.map((column) => {
+                      const supplied = hasOwnValue(insert, column.name);
+                      const value = supplied ? insert[column.name] : undefined;
+                      const editable = canInsert && column.insertable && !column.generated && !column.autoIncrement;
+                      const isEditing = cellEditor?.target === 'insert' && cellEditor.rowIndex === insertIndex && cellEditor.column === column.name;
+                      return (
+                        <td key={column.name} className={`${value === null ? 'db-null-cell' : ''}${value !== undefined && isDefaultValue(value) ? ' db-default-cell' : ''}`}>
+                          {!editable ? <div className="db-insert-readonly">{t('不可新增')}</div> : isEditing && cellEditor !== null ? (
+                            <DatabaseCellEditor
+                              key={`insert:${insertIndex}:${column.name}`}
+                              column={column}
+                              initialValue={cellEditor.initialValue}
+                              allowOmit
+                              disabled={!canUseDatabase || dataBusy || writeFrozen || requiresBaseline}
+                              onSave={(nextValue) => updateInsertDraft(insertIndex, column.name, nextValue)}
+                              onCancel={() => setCellEditor(null)}
+                              onRevert={() => updateInsertDraft(insertIndex, column.name, undefined)}
+                            />
+                          ) : (
+                            <div className="db-cell">
+                              <button className="db-cell-value db-cell-value-editable" type="button" disabled={dataBusy || writeFrozen || requiresBaseline} onDoubleClick={() => beginCellEdit('insert', insertIndex, column.name, value)} title={t('双击编辑新增行的本地草稿')}>{displayValueText(value, t('未设置'), t('空字符串'))}</button>
+                              <button className="db-cell-draft" aria-label={t('编辑新增行的 {{column}}', { column: column.name })} disabled={dataBusy || writeFrozen || requiresBaseline} type="button" onClick={() => beginCellEdit('insert', insertIndex, column.name, value)} title={t('双击编辑新增行的本地草稿')}><Pencil size={13} /></button>
+                              <button className="db-cell-copy" aria-label={t('复制新增行 {{column}} 的精确值', { column: column.name })} disabled={value === undefined} type="button" onClick={() => { if (value !== undefined) void copyText(valueText(value), t('已复制新增草稿值。')); }} title={t('复制精确值')}><Copy size={13} /></button>
+                            </div>
+                          )}
                         </td>
-                      )}
-                      {displayColumns.map((column, columnIndex) => {
-                        const original = row[columnIndex] ?? null;
-                        const value = activeTable ? draftValue(rowIndex, column.name, original) : original;
-                        const cellKey = `${rowIndex}:${column.name}`;
-                        const isExpanded = expandedCells.has(cellKey);
-                        const isEditing = cellEditor?.target === 'update' && cellEditor.rowIndex === rowIndex && cellEditor.column === column.name;
-                        const editable = canUpdateOrDelete && column.editable && !column.primaryKey && !column.generated && !column.autoIncrement && !rowDeleted;
-                        const long = typeof value === 'string' && value.length > 140;
-                        return (
-                          <td key={column.name} className={`${value === null ? 'db-null-cell' : ''}${isDefaultValue(value) ? ' db-default-cell' : ''}`}>
-                            {isEditing && cellEditor !== null ? (
-                              <DatabaseCellEditor
-                                key={`update:${rowIndex}:${column.name}`}
-                                column={column}
-                                initialValue={cellEditor.initialValue}
-                                allowOmit={false}
-                                disabled={!canUseDatabase || dataBusy || writeFrozen || requiresBaseline}
-                                onSave={(nextValue) => { if (nextValue !== undefined) updateDraft(rowIndex, column.name, nextValue); }}
-                                onCancel={() => setCellEditor(null)}
-                                onRevert={() => updateDraft(rowIndex, column.name, original)}
-                              />
-                            ) : (
-                              <div className={`db-cell ${isExpanded ? 'db-cell-expanded' : ''}`}>
-                                {editable
-                                  ? <Button className="db-cell-value db-cell-value-editable" type="button" variant="tertiary"  onDoubleClick={() => beginCellEdit('update', rowIndex, column.name, original)} render={(buttonProps) => <button {...buttonProps} title={t('双击编辑本地变更草稿；不会执行 SQL')} />} > {displayValueText(value, t('未设置'), t('空字符串'))}</Button>
-                                  : <span className="db-cell-value">{displayValueText(value, t('未设置'), t('空字符串'))}</span>}
-                                {long && <Button className="db-cell-expand" type="button" variant="tertiary" onPress={() => setExpandedCells((current) => {
-                                  const next = new Set(current);
-                                  if (next.has(cellKey)) {
-                                    next.delete(cellKey);
-                                  } else {
-                                    next.add(cellKey);
-                                  }
-                                  return next;
-                                })}>{isExpanded ? t('收起') : t('展开')}</Button>}
-                                {editable && <Button className="db-cell-draft" aria-label={t('编辑 {{column}}', { column: column.name })} isDisabled={dataBusy || writeFrozen || requiresBaseline} isIconOnly type="button" variant="tertiary"  onPress={() => beginCellEdit('update', rowIndex, column.name, original)} render={(buttonProps) => <button {...buttonProps} title={t('双击编辑本地变更草稿；不会执行 SQL')} />} > <Pencil size={13} /></Button>}
-                                <Button className="db-cell-copy" aria-label={t('复制 {{column}} 的精确值', { column: column.name })} isIconOnly type="button" variant="tertiary"  onPress={() => void copyText(valueText(value), t('已复制精确单元格值。'))} render={(buttonProps) => <button {...buttonProps} title={t('复制精确值')} />} > <Copy size={13} /></Button>
-                              </div>
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
+                      );
+                    })}
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
         )}
       </section>
 
-      {activeTable && (
-        <section className="db-change-set">
-          <div className="db-change-heading">
-            <div><FilePlus2 size={16} /><strong>{t('本地变更草稿')}</strong><span>{t('{{count}} 项{{status}}', { count: draftCount, status: previewing ? t(' · 预览生成中') : applying ? t(' · 正在提交') : preview ? t(' · 已生成一次性预览') : t(' · 尚未提交') })}</span></div>
-            <div>
-              {canInsert && <Button isDisabled={dataBusy || writeFrozen || requiresBaseline} type="button" variant="secondary" onPress={createInsertDraft}><Plus size={14} />{t('新增草稿')}</Button>}
-              <Button ref={saveButton} isDisabled={!canUseDatabase || dataBusy || cellEditor !== null || !changes || draftCount === 0 || writeFrozen || requiresBaseline} type="button" variant="primary" onPress={() => void requestPreview()}>
-                {previewing ? <LoaderCircle className="db-spin" size={13} /> : <Save size={13} />}{t('保存更改…')}
-              </Button>
-              <Button type="button" variant="tertiary" onPress={() => setChangePanelOpen((open) => !open)}>{changePanelOpen ? t('收起') : t('查看变更集')}</Button>
-              <Button isDisabled={dataBusy || writeFrozen || requiresBaseline || draftCount === 0} type="button" variant="tertiary" onPress={() => setDiscardAction({ kind: 'clear' })}><RotateCcw size={14} />{t('清空')}</Button>
-            </div>
+      {activeTable && (draftCount > 0 || preview !== null || applyReport !== null) && (
+        <section className={`db-draft-bar${applyReport ? ` db-draft-bar--${applyReport.result.outcome}` : ''}`} aria-label={t('更改与提交报告')}>
+          <div>
+            <Save size={15} />
+            <strong>{applyReport
+              ? t('提交报告：{{outcome}}', { outcome: applyReport.result.outcome === 'committed' ? t('已提交') : applyReport.result.outcome === 'partial' ? t('部分完成') : applyReport.result.outcome === 'not-started' ? t('未提交任何更改') : t('状态未知') })
+              : t('{{count}} 项变更', { count: draftCount })}
+            </strong>
+            {applyReport?.result.outcome === 'unknown' && <span>{t('写入已冻结')}</span>}
+            {requiresBaseline && <span>{t('需要重新读取')}</span>}
           </div>
-          {(!canUpdateOrDelete && !canInsert) && (
-            <div className="db-crud-blocked">
-              <AlertTriangle size={15} />
-              <div>
-                <p>{activeTableResult?.readonlyReason || (!activeTableResult?.snapshotId ? t('Chen 未返回此表的可编辑快照，因此不能创建可提交草稿。') : t('Chen 未返回可更新或可新增的列元数据。'))}</p>
-                <details><summary>{t('SQL CRUD 状态')}</summary><p>{sqlCrudReason}</p></details>
-              </div>
-            </div>
-          )}
-          {writeFrozen && (
-            <div className="db-crud-blocked">
-              <AlertTriangle size={15} />
-              <div><p>{t('提交终态未知，本会话表格写入和草稿编辑均已冻结。{{state}}请重新连接并核验数据库，绝不重新提交此预览。', { state: canUseDatabase ? t('当前会话仍可查询和读取表。') : t('当前连接已失效。') })}</p></div>
-            </div>
-          )}
-          {requiresBaseline && (
-            <div className="db-crud-blocked">
-              <AlertTriangle size={15} />
-              <div><p>{t('上次提交未完整完成。保留的草稿不能再次预览或提交；请保留 SQL 报告后，明确丢弃草稿并重新读取以建立新基线。')}</p></div>
-            </div>
-          )}
-          {(changePanelOpen || applyReport) && (
-            <div className="db-change-details">
-              <p>{t('更改仍保留在本地。保存时先核对字段变更和 SQL；只有明确确认后才会执行。')}</p>
-              <dl>
-                <div><dt>{t('更新')}</dt><dd>{draft.updates.length}</dd></div>
-                <div><dt>{t('新增')}</dt><dd>{draft.inserts.length}</dd></div>
-                <div><dt>{t('删除')}</dt><dd>{draft.deletes.length}</dd></div>
-              </dl>
-
-              {draft.inserts.length > 0 && (
-                <div className="db-insert-drafts">
-                  <p>{t('新增行按列编辑：未设置会省略列，DEFAULT 写入默认值，NULL 与空字符串分别显示。移除行只删除本地草稿。')}</p>
-                  <div className="db-insert-grid-wrap">
-                    <table className="db-insert-grid">
-                      <thead>
-                        <tr>
-                          <th className="db-grid-actions">{t('草稿')}</th>
-                          {displayColumns.map((column) => <th key={column.name}><span>{column.name}</span><small>{column.type}</small></th>)}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {draft.inserts.map((insert, insertIndex) => (
-                          <tr key={insertIndex}>
-                            <td className="db-grid-actions"><Button aria-label={t('移除此新增草稿')} isDisabled={dataBusy || writeFrozen || requiresBaseline} isIconOnly type="button" variant="tertiary"  onPress={() => removeInsertDraft(insertIndex)} render={(buttonProps) => <button {...buttonProps} title={t('移除此新增草稿')} />} > <Trash2 size={14} /></Button></td>
-                            {displayColumns.map((column) => {
-                              const supplied = hasOwnValue(insert, column.name);
-                              const value = supplied ? insert[column.name] : undefined;
-                              const editable = canInsert && column.insertable && !column.generated && !column.autoIncrement;
-                              const isEditing = cellEditor?.target === 'insert' && cellEditor.rowIndex === insertIndex && cellEditor.column === column.name;
-                              return (
-                                <td key={column.name} className={`${value === null ? 'db-null-cell' : ''}${value !== undefined && isDefaultValue(value) ? ' db-default-cell' : ''}`}>
-                                  {!editable ? <div className="db-insert-readonly">{t('不可新增')}</div> : isEditing && cellEditor !== null ? (
-                                    <DatabaseCellEditor
-                                      key={`insert:${insertIndex}:${column.name}`}
-                                      column={column}
-                                      initialValue={cellEditor.initialValue}
-                                      allowOmit
-                                      disabled={!canUseDatabase || dataBusy || writeFrozen || requiresBaseline}
-                                      onSave={(nextValue) => updateInsertDraft(insertIndex, column.name, nextValue)}
-                                      onCancel={() => setCellEditor(null)}
-                                      onRevert={() => updateInsertDraft(insertIndex, column.name, undefined)}
-                                    />
-                                  ) : (
-                                    <div className="db-cell">
-                                      <Button className="db-cell-value db-cell-value-editable" type="button" variant="tertiary"  onDoubleClick={() => beginCellEdit('insert', insertIndex, column.name)} render={(buttonProps) => <button {...buttonProps} title={t('双击编辑新增行的本地草稿')} />} > {displayValueText(value, t('未设置'), t('空字符串'))}</Button>
-                                      <Button className="db-cell-draft" aria-label={t('编辑新增行的 {{column}}', { column: column.name })} isDisabled={dataBusy || writeFrozen || requiresBaseline} isIconOnly type="button" variant="tertiary"  onPress={() => beginCellEdit('insert', insertIndex, column.name)} render={(buttonProps) => <button {...buttonProps} title={t('双击编辑新增行的本地草稿')} />} > <Pencil size={13} /></Button>
-                                      <Button className="db-cell-copy" aria-label={t('复制新增行 {{column}} 的精确值', { column: column.name })} isDisabled={value === undefined} isIconOnly type="button" variant="tertiary"  onPress={() => {
-                                                                              if (value !== undefined) void copyText(valueText(value), t('已复制新增草稿值。'));
-                                                                            }} render={(buttonProps) => <button {...buttonProps} title={t('复制精确值')} />} > <Copy size={13} /></Button>
-                                    </div>
-                                  )}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {applyReport && (
-                <section className={`db-apply-report db-apply-${applyReport.result.outcome}`} role={applyReport.result.outcome === 'unknown' ? 'alert' : undefined}>
-                  <div className="db-preview-heading"><strong>{t('提交报告：{{outcome}}', { outcome: applyReport.result.outcome === 'committed' ? t('已提交') : applyReport.result.outcome === 'partial' ? t('部分完成') : applyReport.result.outcome === 'not-started' ? t('未开始') : t('状态未知') })}</strong></div>
-                  <p>{applyReport.result.message}</p>
-                  <dl>
-                    <div><dt>{t('已应用')}</dt><dd>{applyReport.result.outcome === 'unknown' ? t('无法确认') : t('{{applied}} / {{total}}', { applied: applyReport.result.applied, total: applyReport.result.total })}</dd></div>
-                    {applyReport.result.failedIndex !== undefined && <div><dt>{t('失败序号')}</dt><dd>{applyReport.result.failedIndex + 1}</dd></div>}
-                    {applyReport.result.failure && <div><dt>{t('失败类型')}</dt><dd>{applyReport.result.failure === 'conflict' ? t('冲突') : t('被拒绝')}</dd></div>}
-                    <div><dt>{t('刷新')}</dt><dd>{applyReport.refresh === 'pending' ? t('重新读取中') : applyReport.refresh === 'refreshed' ? t('已重新读取') : applyReport.refresh === 'failed' ? t('提交已确认，刷新失败') : t('不适用')}</dd></div>
-                  </dl>
-                  {applyReport.result.outcome === 'committed' && applyReport.refresh === 'failed' && <p className="db-sequential-warning">{t('提交已经确认；刷新失败不会触发回滚或自动重试。')}</p>}
-                  {(applyReport.result.outcome === 'partial' || applyReport.result.outcome === 'not-started') && <p className="db-sequential-warning">{t('此预览已被消耗，不能直接重新提交。已完成的逐条事务不会回滚；请复制报告后丢弃草稿并重新读取。')}</p>}
-                  {applyReport.result.outcome === 'unknown' && <p className="db-sequential-warning">{t('不要重复提交。此会话写入已冻结；重新连接后必须先核验数据库。')}</p>}
-                  <div className="db-change-actions">
-                    <Button type="button" variant="tertiary" onPress={() => void copyText(applyReport.preview.sql.join('\n\n'), t('已复制提交报告中的 SQL。'))}><Copy size={13} />{t('复制 SQL')}</Button>
-                    {requiresBaseline && <Button isDisabled={!canUseDatabase || dataBusy} type="button" variant="secondary" onPress={() => setDiscardAction({ kind: 'reload' })}><RefreshCw size={13} />{t('丢弃草稿并重新读取')}</Button>}
-                  </div>
-                  <pre>{applyReport.preview.sql.join('\n\n')}</pre>
-                </section>
-              )}
-            </div>
-          )}
+          <div>
+            <Button
+              ref={saveButton}
+              isDisabled={!applyReport && (!canUseDatabase || dataBusy || cellEditor !== null || !changes || draftCount === 0 || writeFrozen || requiresBaseline)}
+              type="button"
+              variant="primary"
+              onPress={() => {
+                if (preview || applyReport) {
+                  setSheetOpen(true);
+                } else {
+                  void requestPreview();
+                }
+              }}
+            >
+              {previewing ? <LoaderCircle className="db-spin" size={13} /> : <Save size={13} />}
+              {applyReport ? t('查看提交报告') : t('查看并保存更改')}
+            </Button>
+            {draftCount > 0 && !preview && !applyReport && <Button isDisabled={dataBusy || writeFrozen || requiresBaseline} type="button" variant="tertiary" onPress={() => setDiscardAction({ kind: 'clear' })}><RotateCcw size={14} />{t('清空')}</Button>}
+          </div>
         </section>
       )}
     </main>
-    {preview && (
-      <Modal isOpen={previewOpen} onOpenChange={(isOpen) => {
-        if (!isOpen && !applying) closePreview();
+    {sheetContentAvailable && (
+      <Modal isOpen={sheetVisible} onOpenChange={(isOpen) => {
+        if (!isOpen && !applying) closeSheet();
       }}>
-        <Modal.Backdrop className="db-save-backdrop" isDismissable={!applying} isKeyboardDismissDisabled={applying}>
-          <Modal.Container className="db-save-container" placement="center" scroll="inside">
-            <Modal.Dialog
-              className={`db-save-dialog${previewExpired && !applying ? ' db-preview-expired' : ''}`}
-              aria-describedby={`db-save-description-${session.id}`}
-            >
-              <div ref={previewDialog} className="db-save-dialog-content" aria-busy={applying}>
-              <Modal.Header className="db-save-header">
-                <div>
-                  <Modal.Heading id={`db-save-title-${session.id}`}>{t('确认保存数据库更改')}</Modal.Heading>
-                  <p id={`db-save-description-${session.id}`}>{t('核对字段变更与将执行的 SQL。取消仅关闭弹窗，保留本地草稿。')}</p>
-                </div>
-                <Button className="icon-button" aria-label={t('关闭保存确认')} isDisabled={applying} isIconOnly type="button" variant="tertiary" onPress={closePreview}><X size={19} /></Button>
-              </Modal.Header>
-              <Modal.Body className="db-save-body" tabIndex={0} aria-label={t('字段变更与 SQL 预览')}>
-                <dl className="db-save-context">
-                  <div><dt>{t('环境')}</dt><dd>{session.context.assetName}@{session.context.address}</dd></div>
-                  <div><dt>{t('站点')}</dt><dd>{session.context.siteId}</dd></div>
-                  {preview.reviewedSearch && <div><dt>{t('表搜索')}</dt><dd>{t('{{column}} 包含 {{text}}', { column: preview.reviewedSearch.column || t('全部列'), text: JSON.stringify(preview.reviewedSearch.text) })}</dd></div>}
-                  <div><dt>{t('账户')}</dt><dd>{session.context.accountName}</dd></div>
-                  <div><dt>{t('架构 / 表')}</dt><dd>{preview.schema}.{preview.table}</dd></div>
-                  <div><dt>{t('更新')}</dt><dd>{preview.counts.updates}</dd></div>
-                  <div><dt>{t('新增')}</dt><dd>{preview.counts.inserts}</dd></div>
-                  <div><dt>{t('删除')}</dt><dd>{preview.counts.deletes}</dd></div>
-                </dl>
-                <div className="db-save-review-layout">
-                  <section className="db-review-diff" aria-label={t('将提交的字段变更')}>
-                    <h4>{t('将确认提交的字段变更')}</h4>
-                    <p>{t('以下内容已随本次预览固定，不会直接执行。')}</p>
-                    {preview.reviewedChanges.updates.map((change, index) => (
-                      <article key={`update-${index}`}>
-                        <header><strong>{t('更新 #{{index}}', { index: index + 1 })}</strong><span>{t('行标识：')}<code>{reviewedRowIdentity(change.row)}</code></span></header>
-                        <dl>
-                          {Object.entries(change.values).map(([column, value]) => (
-                            <div key={column}>
-                              <dt>{column}</dt>
-                              <dd><span>{t('旧')} <code>{reviewedValueText(change.row[column])}</code></span><b>→</b><span>{t('新')} <code>{reviewedValueText(value)}</code></span></dd>
-                            </div>
-                          ))}
-                        </dl>
-                      </article>
-                    ))}
-                    {preview.reviewedChanges.inserts.map((values, index) => (
-                      <article key={`insert-${index}`}>
-                        <header><strong>{t('新增 #{{index}}', { index: index + 1 })}</strong><span>{t('仅下列明确值会写入；未列出的列将被省略。')}</span></header>
-                        {Object.keys(values).length > 0 ? (
-                          <dl>
-                            {Object.entries(values).map(([column, value]) => (
-                              <div key={column}><dt>{column}</dt><dd><code>{reviewedValueText(value)}</code></dd></div>
-                            ))}
-                          </dl>
-                        ) : <p>{t('不提供明确列值；Chen 将按表默认值处理。')}</p>}
-                      </article>
-                    ))}
-                    {preview.reviewedChanges.deletes.map((row, index) => (
-                      <article key={`delete-${index}`}>
-                        <header><strong>{t('删除 #{{index}}', { index: index + 1 })}</strong><span>{t('行标识：')}<code>{reviewedRowIdentity(row)}</code></span></header>
-                        <p>{t('将使用 Chen 已验证的快照和此行标识删除该行。')}</p>
-                      </article>
-                    ))}
-                  </section>
-                  <section className="db-save-sql" aria-label={t('将执行的 SQL')}>
-                    <h4 className="db-generated-sql-heading">{t('将执行的 SQL')}</h4>
-                    <p className="db-sequential-warning">{t('按顺序逐条提交：每条 SQL 都在独立事务中提交，整个变更集不是原子批次。后续失败时，先前已成功的提交仍会保留；不存在全局回滚。每条提交仅以精确受影响行数和事务确认判定；无法确认连接或事务状态时会转为未知并冻结写入。')}</p>
-                    {preview.warnings.length > 0 && <ul className="db-preview-warnings">{preview.warnings.map((warning, index) => <li key={`${warning}-${index}`}>{warning}</li>)}</ul>}
-                    <pre>{preview.sql.join('\n\n')}</pre>
-                  </section>
-                </div>
-              </Modal.Body>
-              <Modal.Footer className="db-save-footer">
-                <span className="db-save-expiry" role="status">{applying ? t('正在提交，请勿重复操作…') : previewExpired ? t('预览已过期，请重新生成后确认。') : t('预览有效至 {{time}}', { time: formatDateTime(preview.expiresAt) })}</span>
-                <div className="db-change-actions">
-                  <Button className="app-action button-quiet" type="button" variant="tertiary" onPress={() => void copyText(preview.sql.join('\n\n'), t('已复制预览 SQL。'))}><Copy size={13} />{t('复制 SQL')}</Button>
-                  <Button ref={previewCancel} className="app-action button-quiet" isDisabled={applying} type="button" variant="tertiary" onPress={closePreview}>{t('取消，保留草稿')}</Button>
-                  {previewExpired && !applying
-                    ? <Button className="app-action" isDisabled={!canUseDatabase || dataBusy || writeFrozen || requiresBaseline} type="button" variant="secondary" onPress={() => void requestPreview()}>{t('重新生成预览')}</Button>
-                    : <Button className="app-action db-primary-submit" isDisabled={!canUseDatabase || dataBusy || writeFrozen || requiresBaseline} type="button" variant="primary" onPress={() => void submitPreview()}>{applying ? <LoaderCircle className="db-spin" size={13} /> : <Save size={13} />}{applying ? t('正在提交…') : t('确认并执行 SQL')}</Button>}
-                </div>
-              </Modal.Footer>
+        <Modal.Backdrop className="db-sheet-backdrop" isDismissable={!applying} isKeyboardDismissDisabled={applying}>
+          <Modal.Container className="db-sheet-container" placement="bottom" scroll="inside">
+            <Modal.Dialog className={`db-sheet${sheetExpanded ? ' db-sheet--expanded' : ''}${previewExpired && preview && !applying ? ' db-preview-expired' : ''}`} aria-describedby={preview ? `db-sheet-description-${session.id}` : undefined}>
+              <div ref={sheetDialog} className="db-sheet-content" aria-busy={applying}>
+                <Modal.Header className="db-sheet-header">
+                  <div>
+                    <Modal.Heading id={`db-sheet-title-${session.id}`}>{preview ? t('确认数据库更改') : t('提交报告')}</Modal.Heading>
+                    {preview && <p id={`db-sheet-description-${session.id}`}>{t('核对草稿变更和 SQL；关闭不会丢失任何草稿或报告。')}</p>}
+                  </div>
+                  <div className="db-sheet-header-actions">
+                    <Button aria-label={sheetExpanded ? t('收起变更面板') : t('展开变更面板')} aria-pressed={sheetExpanded} isIconOnly type="button" variant="tertiary" onPress={() => setSheetExpanded((expanded) => !expanded)}>
+                      {sheetExpanded ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
+                    </Button>
+                    <Button ref={sheetClose} aria-label={t('关闭变更面板')} isDisabled={applying} isIconOnly type="button" variant="tertiary" onPress={closeSheet}><X size={19} /></Button>
+                  </div>
+                </Modal.Header>
+                <Modal.Body className="db-sheet-body" aria-label={preview ? t('将提交的字段变更') : t('提交报告')}>
+                  {preview ? (
+                    <>
+                      <dl className="db-sheet-context">
+                        <div><dt>{t('环境')}</dt><dd>{session.context.assetName}@{session.context.address}</dd></div>
+                        <div><dt>{t('账户')}</dt><dd>{session.context.accountName}</dd></div>
+                        <div><dt>{t('架构 / 表')}</dt><dd>{preview.schema}.{preview.table}</dd></div>
+                        {preview.reviewedSearch && <div><dt>{t('表搜索')}</dt><dd>{t('{{column}} 包含 {{text}}', { column: preview.reviewedSearch.column || t('全部列'), text: JSON.stringify(preview.reviewedSearch.text) })}</dd></div>}
+                        <div><dt>{t('更新')}</dt><dd>{preview.counts.updates}</dd></div>
+                        <div><dt>{t('新增')}</dt><dd>{preview.counts.inserts}</dd></div>
+                        <div><dt>{t('删除')}</dt><dd>{preview.counts.deletes}</dd></div>
+                      </dl>
+                      <p className="db-sequential-warning">{t('非原子提交：语句按顺序逐条提交；后续失败不会回滚之前的提交。')}</p>
+                      {preview.warnings.length > 0 && <ul className="db-preview-warnings">{preview.warnings.map((warning, index) => <li key={`${warning}-${index}`}>{warning}</li>)}</ul>}
+                      <section className="db-review-diff" aria-label={t('将提交的字段变更')}>
+                        <h4>{t('将确认提交的字段变更')}</h4>
+                        {preview.reviewedChanges.updates.map((change, index) => (
+                          <article key={`update-${index}`}>
+                            <header><strong>{t('更新 #{{index}}', { index: index + 1 })}</strong><span>{t('行标识：')}<code>{reviewedRowIdentity(change.row)}</code></span></header>
+                            <dl>
+                              {Object.entries(change.values).map(([column, value]) => (
+                                <div key={column}>
+                                  <dt>{column}</dt>
+                                  <dd><span>{t('旧')} <code>{reviewedValueText(change.row[column])}</code></span><b>→</b><span>{t('新')} <code>{reviewedValueText(value)}</code></span></dd>
+                                </div>
+                              ))}
+                            </dl>
+                          </article>
+                        ))}
+                        {preview.reviewedChanges.inserts.map((values, index) => (
+                          <article key={`insert-${index}`}>
+                            <header><strong>{t('新增 #{{index}}', { index: index + 1 })}</strong><span>{t('仅下列明确值会写入；未列出的列将被省略。')}</span></header>
+                            {Object.keys(values).length > 0 ? (
+                              <dl>
+                                {Object.entries(values).map(([column, value]) => (
+                                  <div key={column}><dt>{column}</dt><dd><code>{reviewedValueText(value)}</code></dd></div>
+                                ))}
+                              </dl>
+                            ) : <p>{t('不提供明确列值；Chen 将按表默认值处理。')}</p>}
+                          </article>
+                        ))}
+                        {preview.reviewedChanges.deletes.map((row, index) => (
+                          <article key={`delete-${index}`}>
+                            <header><strong>{t('删除 #{{index}}', { index: index + 1 })}</strong><span>{t('行标识：')}<code>{reviewedRowIdentity(row)}</code></span></header>
+                            <p>{t('将使用 Chen 已验证的快照和此行标识删除该行。')}</p>
+                          </article>
+                        ))}
+                      </section>
+                      <details className="db-sheet-sql">
+                        <summary>{t('显示 SQL（{{count}} 条）', { count: preview.sql.length })}</summary>
+                        <pre>{preview.sql.join('\n\n')}</pre>
+                      </details>
+                    </>
+                  ) : applyReport && (
+                    <section className={`db-apply-report db-apply-${applyReport.result.outcome}`} role={applyReport.result.outcome === 'unknown' ? 'alert' : undefined}>
+                      <div className="db-preview-heading"><strong>{t('提交报告：{{outcome}}', { outcome: applyReport.result.outcome === 'committed' ? t('已提交') : applyReport.result.outcome === 'partial' ? t('部分完成') : applyReport.result.outcome === 'not-started' ? t('未提交任何更改') : t('状态未知') })}</strong></div>
+                      <p className="db-report-message">{applyReport.result.message}</p>
+                      <p className="db-sequential-warning">{t('非原子提交：语句按顺序逐条提交；后续失败不会回滚之前的提交。')}</p>
+                      {applyReport.result.outcome === 'partial' && <dl className="db-report-summary">
+                        <div><dt>{t('已提交')}</dt><dd>{t('{{count}} 条语句', { count: applyReport.result.applied })}</dd></div>
+                        <div><dt>{t('失败')}</dt><dd>{t('{{count}} 条语句', { count: partialFailedCount })}</dd></div>
+                        <div><dt>{t('未执行')}</dt><dd>{t('{{count}} 条语句', { count: partialNotExecuted })}</dd></div>
+                        {applyReport.result.failedIndex !== undefined && <div><dt>{t('失败序号')}</dt><dd>{applyReport.result.failedIndex + 1}</dd></div>}
+                        {applyReport.result.failure && <div><dt>{t('失败类型')}</dt><dd>{applyReport.result.failure === 'conflict' ? t('冲突') : t('被拒绝')}</dd></div>}
+                      </dl>}
+                      {applyReport.result.outcome === 'committed' && <dl className="db-report-summary">
+                        <div><dt>{t('已提交')}</dt><dd>{t('{{count}} 条语句', { count: applyReport.result.applied })}</dd></div>
+                        <div><dt>{t('刷新')}</dt><dd>{applyReport.refresh === 'pending' ? t('重新读取中') : applyReport.refresh === 'refreshed' ? t('已重新读取') : applyReport.refresh === 'failed' ? t('提交已确认，刷新失败') : t('不适用')}</dd></div>
+                      </dl>}
+                      {applyReport.result.outcome === 'unknown' && <p className="db-report-action">{t('提交终态未知，本会话表格写入和草稿编辑均已冻结。请重新连接并核验数据库，绝不重新提交此预览。')}</p>}
+                      {requiresBaseline && <p className="db-report-action">{t('请先放弃未保存的修改并刷新表格，再重新编辑。')}</p>}
+                      {applyReport.result.outcome === 'committed' && applyReport.refresh === 'failed' && <p className="db-report-action">{t('提交已经确认；刷新失败不会触发回滚或自动重试。')}</p>}
+                      <details className="db-sheet-sql">
+                        <summary>{t('显示 SQL（{{count}} 条）', { count: applyReport.preview.sql.length })}</summary>
+                        <ol>{applyReport.preview.sql.map((sql, index) => (
+                          <li key={index}>
+                            <strong>{index < applyReport.result.applied ? t('已提交')
+                              : applyReport.result.outcome === 'unknown' ? t('状态未知')
+                                : index === applyReport.result.failedIndex ? t('失败') : t('未执行')}</strong>
+                            <pre>{sql}</pre>
+                          </li>
+                        ))}</ol>
+                      </details>
+                    </section>
+                  )}
+                </Modal.Body>
+                <Modal.Footer className="db-sheet-footer">
+                  {preview ? (
+                    <>
+                      <span className="db-sheet-status" role="status">{applying ? t('正在提交，请勿重复操作…') : previewExpired ? t('预览已过期，请重新生成后确认。') : t('预览有效至 {{time}}', { time: formatDateTime(preview.expiresAt) })}</span>
+                      <div className="db-sheet-actions">
+                        <Button type="button" variant="tertiary" onPress={() => void copyText(preview.sql.join('\n\n'), t('已复制预览 SQL。'))}><Copy size={13} />{t('复制 SQL')}</Button>
+                        <Button isDisabled={applying} type="button" variant="tertiary" onPress={closeSheet}>{t('关闭，保留草稿和报告')}</Button>
+                        {previewExpired && !applying
+                          ? <Button isDisabled={!canUseDatabase || dataBusy || writeFrozen || requiresBaseline} type="button" variant="secondary" onPress={() => void requestPreview()}>{t('重新生成预览')}</Button>
+                          : <Button className="db-primary-submit" isDisabled={!canUseDatabase || dataBusy || writeFrozen || requiresBaseline} type="button" variant="primary" onPress={() => void submitPreview()}>{applying ? <LoaderCircle className="db-spin" size={13} /> : <Save size={13} />}{applying ? t('正在提交…') : t('确认并执行 SQL')}</Button>}
+                      </div>
+                    </>
+                  ) : applyReport && (
+                    <div className="db-sheet-actions db-sheet-actions--report">
+                      <Button type="button" variant="tertiary" onPress={() => void copyText(applyReport.preview.sql.join('\n\n'), t('已复制提交报告中的 SQL。'))}><Copy size={13} />{t('复制 SQL')}</Button>
+                      {applyReport.result.outcome === 'committed' && applyReport.refresh === 'failed' && <Button isDisabled={!canUseDatabase || dataBusy} type="button" variant="secondary" onPress={requestTableRefresh}><RefreshCw size={13} />{t('重试刷新')}</Button>}
+                      {requiresBaseline && <Button isDisabled={!canUseDatabase || dataBusy} type="button" variant="secondary" onPress={() => { closeSheet(); setDiscardAction({ kind: 'reload' }); }}><RefreshCw size={13} />{t('丢弃草稿并重新读取')}</Button>}
+                      {applyReport.result.outcome === 'unknown' && <Button isDisabled={!onReconnect || reconnecting} type="button" variant="secondary" onPress={onReconnect}><RefreshCw className={reconnecting ? 'db-spin' : ''} size={13} />{reconnecting ? t('正在建立新会话…') : t('重新连接')}</Button>}
+                      <Button type="button" variant="tertiary" onPress={closeSheet}>{t('关闭')}</Button>
+                    </div>
+                  )}
+                </Modal.Footer>
               </div>
             </Modal.Dialog>
           </Modal.Container>

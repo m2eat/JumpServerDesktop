@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assetsOptionsArgsSchema, parseConnectionToken, parseContext, parseIdentity, parsePermittedAsset, toAsset, toDesktopConnectMethods } from './schemas';
+import { assetsGroupsArgsSchema, assetsListArgsSchema, assetsOptionsArgsSchema, isSyntheticPermittedNode, parseConnectionToken, parseContext, parseIdentity, parsePaginatedNodes, parsePermittedAsset, toAsset, toAssetGroup, toDesktopConnectMethods } from './schemas';
 
 describe('Core authorization response parsing', () => {
   it('allows active connection tokens whose optional approval ticket is null', () => {
@@ -104,6 +104,45 @@ describe('Core authorization response parsing', () => {
       { value: 'sftp_client', label: 'SFTP Client', protocol: 'sftp', component: 'koko', type: 'native', endpointProtocol: 'sftp' },
       { value: 'web_gui', label: 'Web GUI', protocol: 'mysql', component: 'chen', type: 'web', endpointProtocol: 'http' }
     ]);
+  });
+
+  it('normalizes real Core group keys into nested groups and rejects synthetic or malformed scopes', () => {
+    const orgId = '0f35c0f1-0ab0-4a15-8f46-1a502ec296f3';
+    const root = {
+      id: '00000000-0000-4000-8000-000000000010',
+      name: 'Production',
+      key: '1',
+      value: 'Production',
+      full_value: '/Default/Production',
+      org_id: orgId,
+      assets_amount: 3
+    };
+    const child = {
+      ...root,
+      id: '00000000-0000-4000-8000-000000000011',
+      name: 'Web',
+      key: '1:2',
+      value: 'Web',
+      full_value: '/Default/Production/Web'
+    };
+
+    expect(toAssetGroup(root, orgId)).toEqual({
+      id: root.id,
+      key: '1',
+      parentKey: '',
+      name: 'Production',
+      path: '/Default/Production'
+    });
+    expect(toAssetGroup(child, orgId).parentKey).toBe('1');
+    expect(parsePaginatedNodes({ count: 2, results: [root, child] })).toMatchObject({ total: 2, paginated: true });
+    expect(parsePaginatedNodes([root, child])).toMatchObject({ total: 2, paginated: false });
+    expect(isSyntheticPermittedNode({ id: 'favorite', key: 'favorite' })).toBe(true);
+    expect(isSyntheticPermittedNode({ id: 'ungrouped', key: 'ungrouped' })).toBe(true);
+    expect(isSyntheticPermittedNode(root)).toBe(false);
+    expect(() => assetsGroupsArgsSchema.parse({ parentKey: 'favorite' })).toThrow();
+    expect(() => assetsListArgsSchema.parse({ nodeId: 'favorite' })).toThrow();
+    expect(() => toAssetGroup({ ...root, key: 'favorite' }, orgId)).toThrow();
+    expect(() => toAssetGroup({ ...root, org_id: '00000000-0000-4000-8000-000000000012' }, orgId)).toThrow();
   });
 
   it('rejects a profile that cannot establish an identity summary', () => {

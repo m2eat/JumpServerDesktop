@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { FormEvent, ReactNode } from 'react';
+import type { CSSProperties, FormEvent, ReactNode } from 'react';
 import { z } from 'zod';
 import { AlertDialog, Button, Input, Modal, Popover, Radio, RadioGroup } from '@heroui/react';
 import {
-  ArrowRight, Bell, Check, CircleAlert, Database, FolderOpen,
+  ArrowRight, Bell, Check, ChevronRight, CircleAlert, Database, FolderOpen,
   History, KeyRound, LayoutGrid, LayoutPanelLeft, List, LoaderCircle, LogIn,
   LogOut, PanelRight, Plus, RefreshCw, Search, Server, Settings, ShieldCheck,
   SlidersHorizontal, Star, TerminalSquare, X, type LucideIcon
@@ -12,6 +12,7 @@ import type {
   Account,
   AppEvent,
   Asset,
+  AssetGroup,
   Capability,
   ConnectMethod,
   Identity,
@@ -28,7 +29,10 @@ import TerminalWorkspace from './workspace/TerminalWorkspace';
 import SftpWorkspace from './workspace/SftpWorkspace';
 import type { SftpSide } from './workspace/SftpWorkspace';
 import DatabasePane from './components/DatabasePane';
-import { appendAssetPage, createAssetPagination, hasMoreAssetPages } from './workspace/assetPagination';
+import { hasMoreAssetPages } from './workspace/assetPagination';
+import { assetsResultSchema, readSavedAssetGroup, useAssetBrowser } from './workspace/useAssetBrowser';
+import { AssetGroupTree } from './workspace/AssetGroupTree';
+import { useAssetGroups } from './workspace/useAssetGroups';
 import { searchCommands } from './workspace/commandRegistry';
 import type { CommandDefinition, CommandId } from './workspace/commandRegistry';
 import NewTabPage from './workspace/NewTabPage';
@@ -55,16 +59,6 @@ const identitySchema: z.ZodType<Identity> = z.object({
   orgId: z.string()
 });
 
-const assetSchema: z.ZodType<Asset> = z.object({
-  id: z.string(),
-  name: z.string(),
-  address: z.string(),
-  orgId: z.string(),
-  protocols: z.array(z.string()),
-  category: z.string().optional(),
-  type: z.string().optional(),
-  comment: z.string().optional()
-});
 
 const accountSchema: z.ZodType<Account> = z.object({
   id: z.string(),
@@ -163,7 +157,6 @@ const snapshotSchema: z.ZodType<Snapshot> = z.object({
   rememberedSiteId: z.string().uuid().optional()
 });
 
-const assetsResultSchema = z.object({ assets: z.array(assetSchema), total: z.number().int().nonnegative() });
 const assetOptionsSchema = z.object({ accounts: z.array(accountSchema), methods: z.array(connectMethodSchema) });
 
 const appEventSchema: z.ZodType<AppEvent> = z.discriminatedUnion('type', [
@@ -214,7 +207,6 @@ function sameConnectMethod(left: ResourceContext['connectMethod'], right: Resour
   return left.value === right.value && left.component === right.component && left.type === right.type;
 }
 
-const ASSET_PAGE_SIZE = 100;
 
 const assetCategoryLabels: Readonly<Record<string, string>> = {
   host: '主机',
@@ -307,14 +299,6 @@ export default function App() {
   const theme = useTheme(preferences.theme);
   useLayoutEffect(() => applyTheme(theme), [theme]);
   useEffect(() => { void setLanguage(preferences.language); }, [preferences.language]);
-  const [assetPagination, setAssetPagination] = useState(createAssetPagination);
-  const [assetLoadState, setAssetLoadState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
-  const [assetError, setAssetError] = useState<string | null>(null);
-  const [assetPageLoadState, setAssetPageLoadState] = useState<'idle' | 'loading' | 'error'>('idle');
-  const [assetPageError, setAssetPageError] = useState<string | null>(null);
-  const [assetSearch, setAssetSearch] = useState('');
-  const [assetCategory, setAssetCategory] = useState<string | undefined>();
-  const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [assetOptions, setAssetOptions] = useState<AssetOptionsState>({ stage: 'idle', accounts: [], methods: [], error: null });
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
@@ -338,6 +322,9 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>('library');
   const [assetLayout, setAssetLayout] = useState<'grid' | 'list'>('grid');
   const [siteMenuOpen, setSiteMenuOpen] = useState(false);
+  const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(240);
+  const [groupScopeError, setGroupScopeError] = useState<string | null>(null);
   const [pendingIdentityAction, setPendingIdentityAction] = useState<{ siteId: string | null } | null>(null);
   const [identityBusy, setIdentityBusy] = useState(false);
   const [sidebarView, setSidebarView] = useState<SidebarView>('assets');
@@ -357,9 +344,6 @@ export default function App() {
   const openingFileSlotsRef = useRef(new Set<string>());
   const closingTerminalIdsRef = useRef(new Set<string>());
   const scopeRef = useRef('signed-out');
-  const assetQueryRef = useRef({ search: '', category: undefined as string | undefined, favoritesOnly: false });
-  const assetRequestRef = useRef(0);
-  const assetPageLoadingRef = useRef(false);
   const assetOptionsRequestRef = useRef(0);
   const pickerAssetRequestRef = useRef(0);
   const attachingSessionIdsRef = useRef(new Set<string>());
@@ -376,6 +360,29 @@ export default function App() {
   const assetSearchRef = useRef<HTMLInputElement | null>(null);
   const composingRef = useRef(false);
   const identityBusyRef = useRef(false);
+  const groupNavigationRef = useRef(0);
+  const pendingGroupRestoreRef = useRef<Pick<AssetGroup, 'id' | 'key'> | null>(null);
+  const closeAssetDetails = useCallback(() => {
+    groupNavigationRef.current++;
+    pendingGroupRestoreRef.current = null;
+    setGroupScopeError(null);
+    assetOptionsRequestRef.current++;
+    setSelectedAsset(null);
+    setSelectedAccountId(null);
+    setAssetOptions({ stage: 'idle', accounts: [], methods: [], error: null });
+  }, []);
+  const assetBrowser = useAssetBrowser(identity, closeAssetDetails);
+  const groups = useAssetGroups(identity);
+  const {
+    query: { search: assetSearch, category: assetCategory, favoritesOnly, groupPath },
+    pagination: assetPagination, stage: assetLoadState, pageStage: assetPageLoadState,
+    setSearch: changeAssetSearch, setCategory: changeAssetCategory, setFavorites: changeFavoritesOnly,
+    clear: clearAssetBrowser, resetAll: resetAssetBrowser, selectGroup: selectBrowserGroup,
+    refresh: refreshAssetBrowser, refreshFavorites, loadMore: requestNextAssetPage
+  } = assetBrowser;
+  const selectedGroup = groupPath.at(-1) ?? null;
+  const assetError = assetBrowser.error ? getErrorMessage(assetBrowser.error) : null;
+  const assetPageError = assetBrowser.pageError ? getErrorMessage(assetBrowser.pageError) : null;
 
   const selectedSite = useMemo(() => sites.find((site) => site.id === selectedSiteId) ?? null, [selectedSiteId, sites]);
   const selectedAccount = useMemo(
@@ -425,8 +432,64 @@ export default function App() {
       toastTimerRef.current.delete(timer);
       setToasts((current) => current.filter((toast) => toast.id !== id));
     }, 5200);
+
     toastTimerRef.current.add(timer);
   }, []);
+  const groupScope = getScopeKey(identity);
+  const { restoreGroup, refreshPath, resolvePath, refresh: refreshGroups } = groups;
+  useEffect(() => {
+    if (!identity) return;
+    const saved = readSavedAssetGroup(identity);
+    if (!saved) return;
+    const navigation = groupNavigationRef.current;
+    let cancelled = false;
+    void restoreGroup(saved).then(result => {
+      if (cancelled || navigation !== groupNavigationRef.current) return;
+      if (result.status === 'found') selectBrowserGroup(result.path);
+      else if (result.status === 'unavailable') {
+        resetAssetBrowser();
+        addToast(t('原分组已不存在或不再可访问，已返回全部资产。'));
+      } else {
+        pendingGroupRestoreRef.current = saved;
+        setGroupScopeError(result.error);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [groupScope, restoreGroup, selectBrowserGroup, resetAssetBrowser, addToast]);
+
+  const refreshAssetLibrary = useCallback(async () => {
+    const navigation = groupNavigationRef.current;
+    const reference = selectedGroup ?? pendingGroupRestoreRef.current;
+    if (!reference) {
+      setGroupScopeError(null);
+      refreshAssetBrowser();
+      await refreshGroups();
+      return;
+    }
+    await refreshGroups();
+    if (navigation !== groupNavigationRef.current) return;
+    const result = await resolvePath(reference);
+    if (navigation !== groupNavigationRef.current) return;
+    if (result.status === 'found') selectBrowserGroup(result.path);
+    else if (result.status === 'unavailable') {
+      resetAssetBrowser();
+      addToast(t('原分组已不存在或不再可访问，已返回全部资产。'));
+    } else setGroupScopeError(result.error);
+  }, [selectedGroup, resolvePath, refreshGroups, refreshAssetBrowser, selectBrowserGroup, resetAssetBrowser, addToast]);
+
+  useEffect(() => {
+    if (!selectedGroup || assetLoadState !== 'ready' || assetPagination.total !== 0 || assetSearch || assetCategory) return;
+    let cancelled = false;
+    const navigation = groupNavigationRef.current;
+    void refreshPath(selectedGroup).then(result => {
+      if (cancelled || navigation !== groupNavigationRef.current) return;
+      if (result.status === 'unavailable') {
+        resetAssetBrowser();
+        addToast(t('原分组已不存在或不再可访问，已返回全部资产。'));
+      } else if (result.status === 'error') setGroupScopeError(result.error);
+    });
+    return () => { cancelled = true; };
+  }, [selectedGroup, assetLoadState, assetPagination.total, assetSearch, assetCategory, refreshPath, resetAssetBrowser, addToast]);
 
   const storeFileSlots = useCallback((next: Record<string, string>) => {
     fileSlotsRef.current = next;
@@ -434,9 +497,7 @@ export default function App() {
   }, []);
 
   const clearScopedMemory = useCallback(() => {
-    assetRequestRef.current += 1;
-    assetPageLoadingRef.current = false;
-    assetQueryRef.current = { search: '', category: undefined, favoritesOnly: false };
+    clearAssetBrowser();
     pickerAssetRequestRef.current += 1;
     assetOptionsRequestRef.current += 1;
     openingSessionKindsRef.current.clear();
@@ -447,14 +508,6 @@ export default function App() {
     dirtySessionStateRef.current.clear();
     dirtyHandlerRef.current.clear();
     setOpeningSessionKinds([]);
-    setAssetPagination(createAssetPagination());
-    setAssetLoadState('idle');
-    setAssetError(null);
-    setAssetPageLoadState('idle');
-    setAssetPageError(null);
-    setAssetSearch('');
-    setAssetCategory(undefined);
-    setFavoritesOnly(false);
     setPickerAssets([]);
     setPickerAssetState('idle');
     setSelectedAsset(null);
@@ -481,79 +534,8 @@ export default function App() {
     setCancelingTaskIds([]);
     setAttachingSessionIds([]);
     setPreferences((current) => ({ ...current, favorites: [], recent: [] }));
-  }, [storeFileSlots]);
+  }, [clearAssetBrowser, storeFileSlots]);
 
-  const requestAssets = useCallback(async (nextIdentity: Identity, search: string, category: string | undefined, nextFavoritesOnly: boolean) => {
-    const requestId = ++assetRequestRef.current;
-    assetPageLoadingRef.current = false;
-    setAssetPagination(createAssetPagination());
-    setAssetLoadState('loading');
-    setAssetError(null);
-    setAssetPageLoadState('idle');
-    setAssetPageError(null);
-    try {
-      const response: unknown = await window.desktop.invoke('assets.list', {
-        search: search.trim() || undefined,
-        ...(category ? { category } : {}),
-        offset: 0,
-        limit: ASSET_PAGE_SIZE,
-        favoritesOnly: nextFavoritesOnly || undefined
-      });
-      const parsed = assetsResultSchema.parse(response);
-      const pagination = appendAssetPage(createAssetPagination(), parsed);
-      if (requestId !== assetRequestRef.current || getScopeKey(nextIdentity) !== scopeRef.current) {
-        return;
-      }
-      setAssetPagination(pagination);
-      setAssetLoadState('ready');
-    } catch (error: unknown) {
-      if (requestId !== assetRequestRef.current || getScopeKey(nextIdentity) !== scopeRef.current) {
-        return;
-      }
-      setAssetPagination(createAssetPagination());
-      setAssetLoadState('error');
-      setAssetError(getErrorMessage(error));
-    }
-  }, []);
-
-  const requestNextAssetPage = useCallback(async () => {
-    const nextIdentity = identityRef.current;
-    if (nextIdentity === null || assetPageLoadingRef.current || !hasMoreAssetPages(assetPagination)) {
-      return;
-    }
-    const requestId = ++assetRequestRef.current;
-    const requestScope = getScopeKey(nextIdentity);
-    const pageOffset = assetPagination.offset;
-    assetPageLoadingRef.current = true;
-    setAssetPageLoadState('loading');
-    setAssetPageError(null);
-    try {
-      const response: unknown = await window.desktop.invoke('assets.list', {
-        search: assetSearch.trim() || undefined,
-        ...(assetCategory ? { category: assetCategory } : {}),
-        offset: pageOffset,
-        limit: ASSET_PAGE_SIZE,
-        favoritesOnly: favoritesOnly || undefined
-      });
-      const parsed = assetsResultSchema.parse(response);
-      const pagination = appendAssetPage(assetPagination, parsed);
-      if (requestId !== assetRequestRef.current || requestScope !== scopeRef.current) {
-        return;
-      }
-      setAssetPagination(pagination);
-      setAssetPageLoadState('idle');
-    } catch (error: unknown) {
-      if (requestId !== assetRequestRef.current || requestScope !== scopeRef.current) {
-        return;
-      }
-      setAssetPageLoadState('error');
-      setAssetPageError(getErrorMessage(error));
-    } finally {
-      if (requestId === assetRequestRef.current) {
-        assetPageLoadingRef.current = false;
-      }
-    }
-  }, [assetPagination, assetCategory, assetSearch, favoritesOnly]);
 
   const applySnapshot = useCallback((snapshot: Snapshot) => {
     const nextScope = getScopeKey(snapshot.identity);
@@ -592,11 +574,6 @@ export default function App() {
     });
     setBootstrapState('ready');
     setBootstrapError(null);
-    if (snapshot.identity === null) {
-      setAssetPagination(createAssetPagination());
-      setAssetLoadState('idle');
-      setAssetPageLoadState('idle');
-    }
   }, [addToast, clearScopedMemory, storeFileSlots]);
 
   const loadSnapshot = useCallback(async () => {
@@ -627,6 +604,7 @@ export default function App() {
   }, [clearScopedMemory, loadSnapshot]);
 
   const selectAsset = useCallback(async (asset: Asset) => {
+    groupNavigationRef.current++;
     const currentIdentity = identityRef.current;
     if (currentIdentity === null) {
       addToast(t('请先登录站点，再读取可授权的账号和连接方式。'), 'error');
@@ -1091,6 +1069,7 @@ export default function App() {
       setChoosingSplitTarget(false);
     }
     if (entry.kind === 'asset') {
+      resetAssetBrowser();
       setSidebarView('assets');
       setScreen('library');
       void selectAsset(entry.asset);
@@ -1102,42 +1081,8 @@ export default function App() {
     setPickerOpen(false);
     setPickerQuery('');
     window.requestAnimationFrame(() => pickerTriggerRef.current?.focus());
-  }, [activeTabId, executeCommand, secondaryTabId, selectAsset]);
+  }, [activeTabId, executeCommand, secondaryTabId, selectAsset, resetAssetBrowser]);
 
-  const invalidateAssetPages = useCallback(() => {
-    assetRequestRef.current += 1;
-    assetPageLoadingRef.current = false;
-    assetOptionsRequestRef.current += 1;
-    setAssetPagination(createAssetPagination());
-    setAssetLoadState('idle');
-    setAssetError(null);
-    setAssetPageLoadState('idle');
-    setAssetPageError(null);
-    setSelectedAsset(null);
-    setSelectedAccountId(null);
-    setAssetOptions({ stage: 'idle', accounts: [], methods: [], error: null });
-  }, []);
-
-  const changeAssetSearch = useCallback((search: string) => {
-    if (assetQueryRef.current.search === search) return;
-    assetQueryRef.current = { ...assetQueryRef.current, search };
-    invalidateAssetPages();
-    setAssetSearch(search);
-  }, [invalidateAssetPages]);
-
-  const changeFavoritesOnly = useCallback((nextFavoritesOnly: boolean) => {
-    if (assetQueryRef.current.favoritesOnly === nextFavoritesOnly) return;
-    assetQueryRef.current = { ...assetQueryRef.current, favoritesOnly: nextFavoritesOnly };
-    invalidateAssetPages();
-    setFavoritesOnly(nextFavoritesOnly);
-  }, [invalidateAssetPages]);
-
-  const changeAssetCategory = useCallback((category: string | undefined) => {
-    if (assetQueryRef.current.category === category) return;
-    assetQueryRef.current = { ...assetQueryRef.current, category };
-    invalidateAssetPages();
-    setAssetCategory(category);
-  }, [invalidateAssetPages]);
 
   useEffect(() => {
     identityRef.current = identity;
@@ -1192,15 +1137,6 @@ export default function App() {
     return unsubscribe;
   }, [addToast, applyIdentity]);
 
-  useEffect(() => {
-    if (identity === null) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      void requestAssets(identity, assetSearch, assetCategory, favoritesOnly);
-    }, 220);
-    return () => window.clearTimeout(timer);
-  }, [assetCategory, assetSearch, favoritesOnly, identity, requestAssets]);
 
   useEffect(() => {
     if (!pickerOpen || identity === null || pickerQuery.trim().startsWith('>')) {
@@ -1309,11 +1245,7 @@ export default function App() {
       ? preferences.favorites.filter((id) => id !== asset.id)
       : [...preferences.favorites, asset.id];
     const savedPreferences = await persistPreferences({ ...preferences, favorites });
-    const currentIdentity = identityRef.current;
-    const currentQuery = assetQueryRef.current;
-    if (savedPreferences !== null && currentQuery.favoritesOnly && currentIdentity !== null) {
-      void requestAssets(currentIdentity, currentQuery.search, currentQuery.category, true);
-    }
+    if (savedPreferences !== null) refreshFavorites();
   };
 
   const pickTab = (tabId: string) => {
@@ -1363,8 +1295,13 @@ export default function App() {
   });
   const openPicker = (query = '') => { setPickerQuery(query); setPickerIndex(0); setPickerOpen(true); };
   const browseHosts = () => { setScreen('library'); setSidebarView('assets'); };
-  const closeAssetDetails = () => { assetOptionsRequestRef.current++; setSelectedAsset(null); setAssetOptions({ stage: 'idle', accounts: [], methods: [], error: null }); };
-  const libraryTitle = sidebarView === 'recent' ? t('最近连接') : sidebarView === 'settings' ? t('设置') : favoritesOnly ? t('收藏的主机') : t('主机');
+  const libraryTitle = sidebarView === 'recent' ? t('最近连接') : sidebarView === 'settings' ? t('设置') : favoritesOnly ? t('收藏的资产') : selectedGroup?.name ?? t('全部资产');
+  const browseAllAssets = () => { assetBrowser.resetAll(); setSidebarView('assets'); setScreen('library'); };
+  const selectAssetGroup = (_group: AssetGroup, path: AssetGroup[]) => {
+    assetBrowser.selectGroup(path);
+    setSidebarView('assets');
+    setScreen('library');
+  };
 
   if (bootstrapState === 'loading') {
     return (
@@ -1425,25 +1362,41 @@ export default function App() {
       </header>
 
       <div className="desktop-body">
-        <section className={`library-layout ${screen !== 'library' ? 'is-inactive' : ''} ${selectedAsset && sidebarView !== 'recent' && sidebarView !== 'settings' ? 'has-details' : ''}`} aria-label={t('资产库')} aria-hidden={screen !== 'library'} inert={screen !== 'library'}>
+        <section className={`library-layout ${sidebarHidden ? 'sidebar-hidden' : ''} ${screen !== 'library' ? 'is-inactive' : ''} ${selectedAsset && sidebarView !== 'recent' && sidebarView !== 'settings' ? 'has-details' : ''}`} style={{ '--sidebar-width': `${sidebarWidth}px` } as CSSProperties} aria-label={t('资产库')} aria-hidden={screen !== 'library'} inert={screen !== 'library'}>
           <aside className="library-sidebar">
             <nav aria-label={t('主导航')}>
-              <Button variant="tertiary" className={sidebarView === 'assets' && !favoritesOnly ? 'nav-item is-selected' : 'nav-item'} type="button" onPress={() => { setSidebarView('assets'); changeFavoritesOnly(false); }}><Server size={18} /><span>{t('主机')}</span></Button>
+              <Button variant="tertiary" className={sidebarView === 'assets' && !favoritesOnly && !selectedGroup ? 'nav-item is-selected' : 'nav-item'} type="button" onPress={browseAllAssets}><Server size={18} /><span>{t('全部资产')}</span></Button>
               <Button variant="tertiary" className={sidebarView === 'assets' && favoritesOnly ? 'nav-item is-selected' : 'nav-item'} type="button" onPress={() => { setSidebarView('assets'); changeFavoritesOnly(true); }}><Star size={18} /><span>{t('收藏')}</span>{preferences.favorites.length > 0 && <small>{preferences.favorites.length}</small>}</Button>
               <Button variant="tertiary" className={sidebarView === 'recent' ? 'nav-item is-selected' : 'nav-item'} type="button" onPress={() => setSidebarView('recent')}><History size={18} /><span>{t('最近连接')}</span></Button>
-              <Button variant="tertiary" className="nav-item" type="button" onPress={() => setScreen('sftp')}><FolderOpen size={18} /><span>SFTP</span></Button>
+            </nav>
+            <div className="library-group-slot"><AssetGroupTree groups={groups} selectedGroupId={sidebarView === 'assets' ? selectedGroup?.id ?? null : null} onSelect={selectAssetGroup} onRefresh={() => void refreshAssetLibrary()} navigationVersion={groupNavigationRef.current} /></div>
+            <nav className="sidebar-bottom-nav" aria-label={t('工作台工具')}>
               <Button variant="tertiary" className="nav-item" type="button" onPress={() => executeCommand('tasks.toggle')}><List size={18} /><span>{t('传输任务')}</span>{taskSummary.length > 0 && <small>{taskSummary.length}</small>}</Button>
               <Button variant="tertiary" className={sidebarView === 'settings' ? 'nav-item is-selected' : 'nav-item'} type="button" onPress={() => executeCommand('settings.open')}><Settings size={18} /><span>{t('设置')}</span></Button>
             </nav>
             <div className="sidebar-identity"><i className={identity ? 'is-connected' : ''} /><span>{identity?.name ?? t('尚未登录')}<small>{selectedSite?.name ?? 'JumpServer Desktop'}</small></span>{identity && <Button variant="tertiary" className="icon-button" type="button" isIconOnly  aria-label={t('注销')} isDisabled={identityBusy} onPress={() => executeCommand('auth.logout')} render={(buttonProps) => <button {...buttonProps} title={t('注销')} />} > <LogOut size={16} /></Button>}</div>
+            <div className="sidebar-resizer" role="separator" aria-label={t('调整侧栏宽度')} aria-orientation="vertical" aria-valuemin={200} aria-valuemax={340} aria-valuenow={sidebarWidth} tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                event.preventDefault();
+                setSidebarWidth(width => Math.max(200, Math.min(340, width + (event.key === 'ArrowRight' ? 16 : -16))));
+              }}
+              onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); event.preventDefault(); }}
+              onPointerMove={(event) => {
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) setSidebarWidth(Math.max(200, Math.min(340, event.clientX - event.currentTarget.parentElement!.getBoundingClientRect().left)));
+              }}
+              onPointerUp={(event) => { event.currentTarget.releasePointerCapture(event.pointerId); }}
+            />
           </aside>
 
           <section className="library-main">
+            {sidebarView === 'settings' && <Button variant="tertiary" className="sidebar-toggle-settings toolbar-button" onPress={() => setSidebarHidden(value => !value)}><LayoutPanelLeft size={16} />{t(sidebarHidden ? '显示侧栏' : '收起侧栏')}</Button>}
             {sidebarView !== 'settings' && <div className="library-tools">
-              {sidebarView === 'assets' ? <div className="host-search input-frame"><Search size={18} /><Input variant="secondary" ref={assetSearchRef} value={assetSearch} onChange={(event) => changeAssetSearch(event.currentTarget.value)} placeholder={t('查找主机名称或地址…')} aria-label={t('搜索授权资产')} />{assetSearch && <Button variant="tertiary" type="button" className="icon-button" isIconOnly aria-label={t('清除搜索')} onPress={() => changeAssetSearch('')}><X size={15} /></Button>}<kbd>{t('搜索主机')}</kbd></div> : <div className="library-page-title"><h1>{libraryTitle}</h1><span>{selectedSite?.name ?? 'JumpServer Desktop'}</span></div>}
+              {sidebarView === 'assets' ? <div className="host-search input-frame"><Search size={18} /><Input variant="secondary" ref={assetSearchRef} value={assetSearch} onChange={(event) => changeAssetSearch(event.currentTarget.value)} placeholder={selectedGroup ? t('在「{{name}}」中搜索名称或地址…', { name: selectedGroup.name }) : favoritesOnly ? t('搜索收藏的资产…') : t('查找资产名称或地址…')} aria-label={t('搜索授权资产')} />{assetSearch && <Button variant="tertiary" type="button" className="icon-button" isIconOnly aria-label={t('清除搜索')} onPress={() => changeAssetSearch('')}><X size={15} /></Button>}<kbd>{t('搜索资产')}</kbd></div> : <div className="library-page-title"><h1>{libraryTitle}</h1><span>{selectedSite?.name ?? 'JumpServer Desktop'}</span></div>}
               <div className="host-toolbar">
                 <div className="host-toolbar-actions">
-                  <Button variant="secondary" className="toolbar-button" type="button" isDisabled={identityBusy || assetLoadState === 'loading'} onPress={() => identity ? void requestAssets(identity, assetSearch, assetCategory, favoritesOnly) : executeCommand(selectedSite ? 'auth.login' : 'site.add')}>{identityBusy || assetLoadState === 'loading' ? <LoaderCircle className="spin" size={15} /> : identity ? <RefreshCw size={15} /> : <LogIn size={15} />}{identity ? t('刷新主机') : selectedSite ? t('登录站点') : t('添加站点')}</Button>
+                  <Button variant="tertiary" className="icon-button" isIconOnly aria-label={t(sidebarHidden ? '显示侧栏' : '收起侧栏')} aria-expanded={!sidebarHidden} onPress={() => setSidebarHidden(value => !value)}><LayoutPanelLeft size={17} /></Button>
+                  <Button variant="secondary" className="toolbar-button" type="button" isDisabled={identityBusy || assetLoadState === 'loading'} onPress={() => identity ? void refreshAssetLibrary() : executeCommand(selectedSite ? 'auth.login' : 'site.add')}>{identityBusy || assetLoadState === 'loading' ? <LoaderCircle className="spin" size={15} /> : identity ? <RefreshCw size={15} /> : <LogIn size={15} />}{identity ? t('刷新资产') : selectedSite ? t('登录站点') : t('添加站点')}</Button>
                   <Button variant="secondary" className="toolbar-button" type="button" onPress={() => setScreen('new')}><TerminalSquare size={16} />{t('新建连接')}</Button>
                 </div>
                 <div className="host-toolbar-options">
@@ -1456,7 +1409,7 @@ export default function App() {
                       <Button variant="tertiary" className={`site-avatar ${identity?.siteId === selectedSiteId ? 'is-authenticated' : ''}`} type="button" isIconOnly aria-label={t('切换 JumpServer 站点')} aria-haspopup="listbox"  isDisabled={identityBusy} render={(buttonProps) => <button {...buttonProps} title={selectedSite?.name ?? t('选择 JumpServer 站点')} />} > {identityBusy ? <LoaderCircle className="spin" size={18} /> : selectedSite?.name.slice(0, 1).toUpperCase() ?? 'J'}</Button>
                       <Popover.Content className="site-popover" placement="bottom end" offset={9}>
                         <Popover.Dialog aria-label={t('JumpServer 站点')}>
-                          <header><strong>{t('JumpServer 站点')}</strong><small>{t('切换站点以浏览对应的授权主机')}</small></header>
+                          <header><strong>{t('JumpServer 站点')}</strong><small>{t('切换站点以浏览对应的授权资产')}</small></header>
                           <div role="listbox" aria-label={t('已配置站点')}>{sites.map((site, index) => <Button variant="tertiary" className={site.id === selectedSiteId ? 'site-option is-selected' : 'site-option'} type="button" key={site.id}   onPress={() => requestIdentityTransition(site.id)} render={(buttonProps) => <button {...buttonProps} role="option"  aria-selected={site.id === selectedSiteId} />} > <span className={`site-option-avatar tone-${index % 4}`}>{site.name.slice(0, 1).toUpperCase()}</span><span><strong>{site.name}</strong><small>{site.url}</small></span>{site.id === selectedSiteId && <Check size={17} />}</Button>)}</div>
                           <footer><Button variant="tertiary" type="button" onPress={() => executeCommand('site.add')}><Plus size={17} />{t('添加 JumpServer 站点')}</Button>{selectedSite && <Button variant="tertiary" type="button" onPress={() => { setSiteMenuOpen(false); setSiteForm({ ...selectedSite, error: '' }); setSiteDialogOpen(true); }}><SlidersHorizontal size={17} />{t('编辑当前站点')}</Button>}</footer>
                         </Popover.Dialog>
@@ -1483,42 +1436,51 @@ export default function App() {
               } /> : sidebarView === 'recent' ? <NewTabPage recent={scopedRecent} siteName={selectedSite?.name ?? ''} onConnect={(context) => void openRecent(context)} onSearch={openPicker} onBrowseHosts={browseHosts} /> : <>
                 {identity === null ? <section className="library-welcome">
                   <span className="welcome-symbol"><Server size={30} strokeWidth={1.5} /></span>
-                  <h1>{selectedSite ? t('连接到 {{name}}', { name: selectedSite.name }) : t('你的主机，从这里开始')}</h1>
-                  <p>{selectedSite ? t('优先恢复已保存授权；需要认证时打开系统浏览器，复用站点的 SSO 与 MFA。') : t('添加 JumpServer 站点，将主机、终端和文件放在同一个工作区。')}</p>
+                  <h1>{selectedSite ? t('连接到 {{name}}', { name: selectedSite.name }) : t('你的资产，从这里开始')}</h1>
+                  <p>{selectedSite ? t('优先恢复已保存授权；需要认证时打开系统浏览器，复用站点的 SSO 与 MFA。') : t('添加 JumpServer 站点，将资产、终端和文件放在同一个工作区。')}</p>
                   {selectedSite && <span className="welcome-address">{selectedSite.url}</span>}
                   {authNotice && <p role="status">{authNotice}</p>}
                   <Button variant="primary" className="app-action button-primary" type="button" isDisabled={identityBusy} onPress={() => executeCommand(selectedSite ? 'auth.login' : 'site.add')}>{identityBusy ? <LoaderCircle className="spin" size={16} /> : selectedSite ? <LogIn size={16} /> : <Plus size={16} />}{identityBusy ? t('正在恢复或等待浏览器授权…') : selectedSite ? t('登录站点') : t('添加站点')}</Button>
                   {identityBusy && <Button variant="secondary" className="app-action button-quiet" type="button" onPress={() => void window.desktop.invoke('auth.cancel', {}).catch((error) => addToast(getErrorMessage(error), 'error'))}>{t('取消登录')}</Button>}
                   <small><ShieldCheck size={13} />{t('OAuth 凭据由系统密钥库加密；不保存目标主机密码')}</small>
                 </section> : <>
-                  {assetSearch.length === 0 && !favoritesOnly && sidebarView === 'assets' && <section className="collections-section"><h2>{t('快速访问')}</h2><div className="collection-grid">
-                    <Button variant="tertiary" className="collection-card" type="button" onPress={() => changeFavoritesOnly(true)}><span className="collection-symbol is-favorite"><Star size={24} /></span><span><strong>{t('收藏的主机')}</strong><small>{t('{{count}} 个收藏', { count: preferences.favorites.length })}</small></span></Button>
+                  <nav className="asset-breadcrumb" aria-label={t('资产分组路径')}>
+                    <Button variant="tertiary" onPress={browseAllAssets}>{t('全部资产')}</Button>
+                    {favoritesOnly && <><ChevronRight size={13} /><span aria-current="page">{t('收藏')}</span></>}
+                    {groupPath.map((group, index) => <span className="asset-breadcrumb-segment" key={group.id}>
+                      <ChevronRight size={13} />
+                      {index === groupPath.length - 1 ? <span aria-current="page" title={group.path}>{group.name}</span> : <Button variant="tertiary" onPress={() => selectAssetGroup(group, groupPath.slice(0, index + 1))}>{group.name}</Button>}
+                    </span>)}
+                  </nav>
+                  {groupScopeError && <InlineError message={groupScopeError} onRetry={() => void refreshAssetLibrary()} />}
+                  {assetSearch.length === 0 && !favoritesOnly && !selectedGroup && sidebarView === 'assets' && <section className="collections-section"><h2>{t('快速访问')}</h2><div className="collection-grid">
+                    <Button variant="tertiary" className="collection-card" type="button" onPress={() => changeFavoritesOnly(true)}><span className="collection-symbol is-favorite"><Star size={24} /></span><span><strong>{t('收藏的资产')}</strong><small>{t('{{count}} 个收藏', { count: preferences.favorites.length })}</small></span></Button>
                     <Button variant="tertiary" className="collection-card" type="button" onPress={() => setSidebarView('recent')}><span className="collection-symbol is-recent"><History size={24} /></span><span><strong>{t('最近连接')}</strong><small>{t('{{count}} 条连接记录', { count: scopedRecent.length })}</small></span></Button>
                     <Button variant="tertiary" className="collection-card" type="button" onPress={() => setScreen('sftp')}><span className="collection-symbol is-files"><FolderOpen size={24} /></span><span><strong>{t('文件工作区')}</strong><small>{t('{{count}} 个活动连接', { count: sessions.filter((session) => session.kind === 'files' && session.phase === 'active').length })}</small></span></Button>
                   </div></section>}
                   <div className="asset-category-strip" role="group" aria-label={t('资产类别')}>
                     {assetCategories.map(({ value, label, Icon }) => <Button variant="tertiary" className={assetCategory === value ? 'is-selected' : ''} type="button" key={value ?? 'all'} aria-pressed={assetCategory === value} onPress={() => changeAssetCategory(value)}><Icon size={15} /><span>{label}</span></Button>)}
                   </div>
-                  <div className="hosts-heading"><h2>{libraryTitle}</h2><span>{assetLoadState === 'ready' ? `${assetPagination.assets.length} / ${assetPagination.total}` : ''}</span>{favoritesOnly && <Button variant="tertiary" className="text-button" type="button" onPress={() => changeFavoritesOnly(false)}>{t('全部主机')}</Button>}</div>
-                  {assetLoadState === 'loading' && <LoadingRows label={t('正在读取授权主机…')} />}
-                  {assetLoadState === 'error' && <InlineError message={assetError ?? t('主机加载失败')} onRetry={() => void requestAssets(identity, assetSearch, assetCategory, favoritesOnly)} />}
-                  {assetLoadState === 'ready' && assetPagination.assets.length === 0 && <EmptyAssetState icon={<Search size={25} />} title={favoritesOnly ? t('还没有可用的收藏') : t('没有找到主机')} detail={favoritesOnly ? t('点击主机卡片上的星标，将常用主机放在这里。') : assetSearch ? t('试试其他名称或地址。') : t('当前身份尚未获得主机授权。')} />}
-                  <div className={`host-grid ${assetLayout === 'list' ? 'is-list' : ''}`} aria-label={t('授权主机')} aria-live="polite">{assetPagination.assets.map((asset) => {
+                  <div className="hosts-heading"><h2>{libraryTitle}</h2><span>{assetLoadState === 'ready' ? t('{{count}} 项资产', { count: assetPagination.total }) : ''}</span>{selectedGroup && <small className="group-descendant-note">{t('含子分组')}</small>}{(selectedGroup || favoritesOnly) && <Button variant="tertiary" className="text-button" type="button" onPress={assetBrowser.searchAll}>{t('搜索全部资产')}<ArrowRight size={13} /></Button>}</div>
+                  {assetLoadState === 'loading' && <LoadingRows label={t('正在读取授权资产…')} />}
+                  {assetLoadState === 'error' && <InlineError message={assetError ?? t('资产加载失败')} onRetry={() => void refreshAssetLibrary()} />}
+                  {assetLoadState === 'ready' && assetPagination.assets.length === 0 && <EmptyAssetState icon={<Search size={25} />} title={favoritesOnly ? t('还没有可用的收藏') : t('没有找到资产')} detail={assetSearch || assetCategory ? t('试试其他名称、地址或资产类型。') : favoritesOnly ? t('点击资产卡片上的星标，将常用资产放在这里。') : selectedGroup ? t('当前分组及子分组中没有可访问的资产。') : t('当前身份尚未获得资产授权。')} />}
+                  <div className={`host-grid ${assetLayout === 'list' ? 'is-list' : ''}`} aria-label={t('授权资产')} aria-live="polite">{assetPagination.assets.map((asset) => {
                     const favorite = preferences.favorites.includes(asset.id);
                     return <article className={selectedAsset?.id === asset.id ? 'host-card is-selected' : 'host-card'} key={asset.id}>
                       <Button variant="tertiary" className="host-card-main" type="button" aria-pressed={selectedAsset?.id === asset.id} onPress={() => void selectAsset(asset)} render={(buttonProps) => <button {...buttonProps} title={`${asset.name} · ${asset.address}`} />} > <AssetSymbol category={asset.category} type={asset.type} /><span className="host-card-copy"><strong>{asset.name}</strong><small>{asset.type && <>{asset.type} · </>}{asset.address}</small></span></Button>
                       <Button variant="tertiary" className={`host-favorite ${favorite ? 'is-active' : ''}`} type="button" isIconOnly aria-label={`${favorite ? t('取消收藏') : t('收藏')} ${asset.name}`} onPress={() => void toggleFavorite(asset)}><Star size={15} fill={favorite ? 'currentColor' : 'none'} /></Button>
                     </article>;
                   })}</div>
-                  {assetLoadState === 'ready' && assetPageLoadState === 'error' && <InlineError message={assetPageError ?? t('无法读取更多主机')} onRetry={() => void requestNextAssetPage()} />}
-                  {assetLoadState === 'ready' && hasMoreAssetPages(assetPagination) && <div className="asset-load-more"><span>{t('已显示 {{count}} / {{total}} 台主机', { count: assetPagination.assets.length, total: assetPagination.total })}</span><Button variant="secondary" className="app-action button-quiet" type="button" isDisabled={assetPageLoadState === 'loading'} onPress={() => void requestNextAssetPage()}>{assetPageLoadState === 'loading' ? <><LoaderCircle className="spin" size={14} />{t('加载中…')}</> : t('加载更多')}</Button></div>}
+                  {assetLoadState === 'ready' && assetPageLoadState === 'error' && <InlineError message={assetPageError ?? t('无法读取更多资产')} onRetry={() => void requestNextAssetPage()} />}
+                  {assetLoadState === 'ready' && hasMoreAssetPages(assetPagination) && <div className="asset-load-more"><span>{t('已显示 {{count}} / {{total}} 项资产', { count: assetPagination.assets.length, total: assetPagination.total })}</span><Button variant="secondary" className="app-action button-quiet" type="button" isDisabled={assetPageLoadState === 'loading'} onPress={() => void requestNextAssetPage()}>{assetPageLoadState === 'loading' ? <><LoaderCircle className="spin" size={14} />{t('加载中…')}</> : t('加载更多')}</Button></div>}
                 </>}
               </>}
             </div>
           </section>
 
           {selectedAsset && sidebarView !== 'recent' && sidebarView !== 'settings' && <aside className="host-details" aria-label={t('资产连接方式')}>
-            <header className="details-header"><div><strong>{t('主机详情')}</strong><span>{selectedSite?.name}</span></div><Button variant="tertiary" className="icon-button" type="button" isIconOnly aria-label={t('关闭连接面板')} onPress={closeAssetDetails}><X size={19} /></Button></header>
+            <header className="details-header"><div><strong>{t('资产详情')}</strong><span>{selectedSite?.name}</span></div><Button variant="tertiary" className="icon-button" type="button" isIconOnly aria-label={t('关闭连接面板')} onPress={closeAssetDetails}><X size={19} /></Button></header>
             <div className="details-scroll"><section className="details-card"><h3>{t('常规')}</h3><div className="detail-host-name"><AssetSymbol category={selectedAsset.category} type={selectedAsset.type} /><strong>{selectedAsset.name}</strong></div><label>{t('地址')}<Input variant="secondary" readOnly value={selectedAsset.address} /></label>{selectedAsset.comment && <p className="detail-comment">{selectedAsset.comment}</p>}</section>
               {assetOptions.stage === 'loading' && <div className="details-loading"><LoaderCircle className="spin" size={18} />{t('正在确认授权…')}</div>}
               {assetOptions.stage === 'error' && <InlineError message={assetOptions.error ?? t('无法读取连接选项')} onRetry={() => void selectAsset(selectedAsset)} />}

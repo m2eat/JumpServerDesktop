@@ -134,7 +134,7 @@ export function QuickSwitcher({
                 aria-activedescendant={activeDescendant}
                 aria-expanded="true"
                 aria-label={t('快速跳转搜索')}
-                placeholder={t('搜索工作区、主机或命令')}
+                placeholder={t('搜索工作区、资产或命令')}
                 value={query}
                 onChange={(event) => onQueryChange(event.target.value)}
                 onKeyDown={onInputKeyDown}

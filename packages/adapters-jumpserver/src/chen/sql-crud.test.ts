@@ -72,7 +72,7 @@ function metadataResult(columns: MetadataColumn[]): QueryResult {
   ]));
 }
 
-function verifiedSnapshot(note = 'before') {
+function verifiedSnapshot(note: string | null = 'before') {
   const metadata = metadataResult([
     {
       name: 'id',
@@ -139,7 +139,7 @@ function compileInsert(snapshot: SqlTableSnapshot, table: string, values: Record
   return sql[0] || '';
 }
 
-it('anchors composite primary-key mutations to every exact original field', () => {
+it('guards updates with the full composite primary key and only assigned original fields', () => {
   const snapshot = verifiedSnapshot();
   const sql = snapshot.compile({
     schema: 'app',
@@ -157,8 +157,42 @@ it('anchors composite primary-key mutations to every exact original field', () =
   expect(sql[0]).toContain("`id` <=> CAST(CONVERT(X'3138343436373434303733373039353531363135' USING utf8mb4) AS UNSIGNED)");
   expect(sql[0]).toContain("BINARY CONVERT(`tenant` USING utf8mb4) <=> BINARY CONVERT(X'6e6f727468' USING utf8mb4)");
   expect(sql[0]).toContain("BINARY CONVERT(`note` USING utf8mb4) <=> BINARY CONVERT(X'6265666f7265' USING utf8mb4)");
-  expect(sql[0]).toContain("BINARY CONVERT(`state` USING utf8mb4) <=> BINARY CONVERT(X'6e6577' USING utf8mb4)");
+  expect(sql[0]).not.toContain('`state`');
   expect(sql[0]).toMatch(/ LIMIT 1$/);
+});
+
+it('keeps full original-row guards for deletes', () => {
+  const snapshot = verifiedSnapshot();
+  const [sql] = snapshot.compile({
+    schema: 'app',
+    table: 'orders',
+    snapshotId: snapshotId(snapshot),
+    updates: [],
+    inserts: [],
+    deletes: [{ id: '18446744073709551615', tenant: 'north', note: 'before', state: 'new' }]
+  });
+  expect(sql).toContain("`id` <=> CAST(CONVERT(X'3138343436373434303733373039353531363135' USING utf8mb4) AS UNSIGNED)");
+  expect(sql).toContain("BINARY CONVERT(`tenant` USING utf8mb4) <=> BINARY CONVERT(X'6e6f727468' USING utf8mb4)");
+  expect(sql).toContain("BINARY CONVERT(`note` USING utf8mb4) <=> BINARY CONVERT(X'6265666f7265' USING utf8mb4)");
+  expect(sql).toContain("BINARY CONVERT(`state` USING utf8mb4) <=> BINARY CONVERT(X'6e6577' USING utf8mb4)");
+});
+
+it('guards NULL originals and DEFAULT assignments in multi-field updates', () => {
+  const snapshot = verifiedSnapshot(null);
+  const [sql] = snapshot.compile({
+    schema: 'app',
+    table: 'orders',
+    snapshotId: snapshotId(snapshot),
+    updates: [{
+      row: { id: '18446744073709551615', tenant: 'north', note: null, state: 'new' },
+      values: { note: 'after', state: { kind: 'default' } }
+    }],
+    inserts: [],
+    deletes: []
+  });
+  expect(sql).toContain('`state` = DEFAULT');
+  expect(sql).toContain('`note` <=> NULL');
+  expect(sql).toContain("BINARY CONVERT(`state` USING utf8mb4) <=> BINARY CONVERT(X'6e6577' USING utf8mb4)");
 });
 
 it('hex-encodes metadata and text rather than interpolating injected or lossy strings', () => {
@@ -385,7 +419,7 @@ it('keeps legacy ENUM snapshot values usable while rejecting that value as a new
     schema: 'app',
     table: 'legacy_enum',
     snapshotId: id,
-    updates: [{ row: { id: '1', state: '', note: 'before' }, values: { note: 'after' } }],
+    updates: [{ row: { id: '1', state: '', note: 'before' }, values: { state: 'ready' } }],
     inserts: [],
     deletes: []
   })[0]).toContain("BINARY CONVERT(`state` USING utf8mb4) <=> BINARY CONVERT('' USING utf8mb4)");

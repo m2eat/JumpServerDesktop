@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { defaultPreferenceSettings, preferenceSettingsSchema } from '../../../desktop-contract/src/preferences';
-import type { Account, Asset, ConnectMethod, Identity, Preferences, ResourceContext } from '../../../desktop-contract/src/index';
+import type { Account, Asset, AssetGroup, ConnectMethod, Identity, Preferences, ResourceContext } from '../../../desktop-contract/src/index';
 
 // Core reserves UUID-shaped organization IDs whose version/variant bits are zero.
 const uuid = z.string().guid();
@@ -22,13 +22,23 @@ export const authLoginArgsSchema = z.object({ siteId: uuid }).strict();
 
 const assetCategoryQuerySchema = nonEmpty.max(64).regex(/^[a-z][a-z0-9_-]*$/);
 
+const permittedNodeKeySchema = z.string().max(64).regex(/^\d+(?::\d+)*$/);
+
+export const assetsGroupsArgsSchema = z
+  .object({
+    parentKey: permittedNodeKeySchema.optional(),
+    search: z.string().trim().max(256).optional()
+  })
+  .strict();
+
 export const assetsListArgsSchema = z
   .object({
     search: z.string().trim().max(256).optional(),
     category: assetCategoryQuerySchema.optional(),
     offset: z.number().int().min(0).max(1_000_000).optional(),
     limit: z.number().int().min(1).max(100).optional(),
-    favoritesOnly: z.boolean().optional()
+    favoritesOnly: z.boolean().optional(),
+    nodeId: uuid.optional()
   })
   .strict();
 
@@ -230,6 +240,40 @@ export function toAsset(value: unknown): Asset {
   };
 }
 
+const permittedNodeKeyOnlySchema = z.object({ key: z.string() }).passthrough();
+
+const permittedNodeSchema = z
+  .object({
+    id: uuid,
+    name: nonEmpty.max(128),
+    key: permittedNodeKeySchema,
+    value: nonEmpty.max(128),
+    full_value: nonEmpty.max(4_096),
+    org_id: uuid,
+    assets_amount: z.number().int().min(0)
+  })
+  .passthrough();
+
+export function isSyntheticPermittedNode(value: unknown): boolean {
+  const node = permittedNodeKeyOnlySchema.safeParse(value);
+  return node.success && (node.data.key === 'favorite' || node.data.key === 'ungrouped');
+}
+
+export function toAssetGroup(value: unknown, expectedOrgId?: string): AssetGroup {
+  const node = permittedNodeSchema.parse(value);
+  if (expectedOrgId !== undefined && node.org_id !== expectedOrgId) {
+    throw new Error('Core returned an asset group for an unexpected organization');
+  }
+  const separator = node.key.lastIndexOf(':');
+  return {
+    id: node.id,
+    key: node.key,
+    parentKey: separator === -1 ? '' : node.key.slice(0, separator),
+    name: node.name,
+    path: node.full_value
+  };
+}
+
 export function toAccounts(value: unknown): Account[] {
   const accounts = z.array(permedAccountSchema).parse(value);
   return accounts.map((account) => ({
@@ -333,17 +377,28 @@ export function toDesktopConnectMethods(
   return selected;
 }
 
+const unknownArraySchema = z.array(z.unknown());
+const paginatedResultsSchema = z
+  .object({
+    count: z.number().int().min(0),
+    results: unknownArraySchema
+  })
+  .passthrough();
+
+function parsePaginatedResults(value: unknown): { values: unknown[]; total: number; paginated: boolean } {
+  const parsed = paginatedResultsSchema.safeParse(value);
+  if (parsed.success) return { values: parsed.data.results, total: parsed.data.count, paginated: true };
+  const values = unknownArraySchema.parse(value);
+  return { values, total: values.length, paginated: false };
+}
+
 export function parsePaginatedAssets(value: unknown): { values: unknown[]; total: number } {
-  const pageSchema = z
-    .object({
-      count: z.number().int().min(0),
-      results: z.array(z.unknown())
-    })
-    .passthrough();
-  const parsed = pageSchema.safeParse(value);
-  if (parsed.success) return { values: parsed.data.results, total: parsed.data.count };
-  const values = z.array(z.unknown()).parse(value);
-  return { values, total: values.length };
+  const page = parsePaginatedResults(value);
+  return { values: page.values, total: page.total };
+}
+
+export function parsePaginatedNodes(value: unknown): { values: unknown[]; total: number; paginated: boolean } {
+  return parsePaginatedResults(value);
 }
 
 const apiErrorSchema = z

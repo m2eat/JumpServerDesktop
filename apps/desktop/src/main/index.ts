@@ -32,6 +32,7 @@ const commands: Readonly<Record<CommandName, true>> = {
   'auth.cancel': true,
   'auth.logout': true,
   'assets.list': true,
+  'assets.groups': true,
   'assets.options': true,
   'session.open': true,
   'session.close': true,
