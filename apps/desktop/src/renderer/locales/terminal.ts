@@ -28,6 +28,7 @@ export const terminalMessages: Record<string, string> = {
   '正在建立受授权连接…': 'Establishing authorized connection…',
   '终端连接已断开：{{message}}': 'Terminal connection closed: {{message}}',
   '连接已断开。重新连接不会重放输入。': 'Connection closed. Reconnecting will not replay input.',
+  '旧终端输出保留在此标签。重新连接将在新标签页建立授权会话，不会恢复原 shell 或重放输入。': 'Previous terminal output stays in this tab. Reconnecting opens an authorized session in a new tab without restoring the old shell or replaying input.',
   '确认多行粘贴': 'Confirm multiline paste',
   '目标：{{asset}} · {{account}}': 'Target: {{asset}} · {{account}}',
   '换行可能立即执行命令，请检查内容。': 'Newlines may immediately execute commands. Review the content.',

@@ -3,7 +3,7 @@ import { Button, Input, Modal } from '@heroui/react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
-import { ArrowDown, ArrowUp, FolderOpen, Search, ShieldAlert, Square, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, FolderOpen, RefreshCw, Search, ShieldAlert, Square, X } from 'lucide-react';
 import type { Preferences, SessionInfo } from '@shared/index';
 import { useI18n } from '../i18n';
 import { attachTerminal } from '../terminal/streams';
@@ -29,7 +29,7 @@ function operationError(key: string, cause: unknown): TerminalError {
   return message === undefined ? { key } : { key, message };
 }
 
-export default function TerminalPane({ session, preferences, onToggleSftp, sftpOpen = false }: { session: SessionInfo; preferences: Preferences; onToggleSftp?: () => void; sftpOpen?: boolean }) {
+export default function TerminalPane({ session, preferences, onToggleSftp, sftpOpen = false, onReconnect, reconnecting }: { session: SessionInfo; preferences: Preferences; onToggleSftp?: () => void; sftpOpen?: boolean; onReconnect: () => void; reconnecting: boolean }) {
   const { t, locale } = useI18n();
   const theme = useTheme(preferences.theme);
   const container = useRef<HTMLDivElement>(null);
@@ -208,6 +208,7 @@ export default function TerminalPane({ session, preferences, onToggleSftp, sftpO
     cancelPaste();
   };
   const displayedError = error === null ? null : t(error.key, { message: error.message ?? t('未知错误。') });
+  const reconnectable = session.phase === 'failed' || session.phase === 'lost' || session.phase === 'closed';
   const disconnectedMessage = session.phase === 'connecting'
     ? t('正在建立受授权连接…')
     : session.error
@@ -230,7 +231,15 @@ export default function TerminalPane({ session, preferences, onToggleSftp, sftpO
     </form>}
     {displayedError && <div className="terminal-error" role="alert">{displayedError}<Button isIconOnly type="button" variant="ghost" aria-label={t('关闭错误')} onPress={() => setError(null)}><X size={13} /></Button></div>}
     <div className="terminal-surface" ref={container} />
-    {session.phase !== 'active' && <div className="terminal-disconnected">{disconnectedMessage}</div>}
+    {session.phase !== 'active' && <div className="terminal-disconnected">
+      <div className="terminal-disconnected-message" role="status">
+        <span>{disconnectedMessage}</span>
+        {reconnectable && <small>{t('旧终端输出保留在此标签。重新连接将在新标签页建立授权会话，不会恢复原 shell 或重放输入。')}</small>}
+      </div>
+      {reconnectable && <Button type="button" variant="secondary" isDisabled={reconnecting} onPress={onReconnect}>
+        <RefreshCw size={14} />{reconnecting ? t('正在建立新会话…') : t('重新连接')}
+      </Button>}
+    </div>}
     {paste !== null && <Modal isOpen onOpenChange={(isOpen) => { if (!isOpen) cancelPaste(); }}>
       <Modal.Backdrop className="terminal-modal-backdrop" isDismissable={false} isKeyboardDismissDisabled>
         <Modal.Container className="terminal-paste-container" placement="center">

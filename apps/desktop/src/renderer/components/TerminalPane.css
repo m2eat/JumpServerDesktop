@@ -126,6 +126,35 @@
   font-size: 12px;
 }
 
+.terminal-disconnected {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.terminal-disconnected-message {
+  flex: 1 1 240px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.terminal-disconnected-message small {
+  display: block;
+  margin-top: 4px;
+}
+
+.terminal-disconnected button {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: auto;
+  padding: 0 10px;
+  border-color: var(--warning);
+  color: var(--warning);
+  white-space: nowrap;
+}
+
 .terminal-error {
   justify-content: space-between;
   border-color: var(--danger-soft);

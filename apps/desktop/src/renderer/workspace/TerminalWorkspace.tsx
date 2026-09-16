@@ -17,9 +17,11 @@ export interface TerminalWorkspaceProps {
   onDisconnect: () => Promise<void>;
   onFileDirtyChange: (dirty: boolean) => void;
   onTransferTasksCreated: (tasks: TransferTask[]) => void;
+  onReconnect: () => void;
+  reconnecting: boolean;
 }
 
-export default function TerminalWorkspace({ session, identity, preferences, fileSession, dirty, onConnect, onDisconnect, onFileDirtyChange, onTransferTasksCreated }: TerminalWorkspaceProps) {
+export default function TerminalWorkspace({ session, identity, preferences, fileSession, dirty, onConnect, onDisconnect, onFileDirtyChange, onTransferTasksCreated, onReconnect, reconnecting }: TerminalWorkspaceProps) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -59,7 +61,7 @@ export default function TerminalWorkspace({ session, identity, preferences, file
   };
 
   return <div className={`terminal-workspace ${open ? 'has-quick-sftp' : ''}`}>
-    <div className="terminal-workspace-console"><TerminalPane session={session} preferences={preferences} onToggleSftp={toggle} sftpOpen={open} /></div>
+    <div className="terminal-workspace-console"><TerminalPane session={session} preferences={preferences} onToggleSftp={toggle} sftpOpen={open} onReconnect={onReconnect} reconnecting={reconnecting} /></div>
     <aside className={`quick-sftp-sidebar ${open ? '' : 'is-inactive'}`} aria-label={t('{{assetName}} 快速 SFTP', { assetName: session.context.assetName })} aria-hidden={!open} inert={!open}>
       <header className="quick-sftp-title"><span><FolderOpen size={16} />{t('快速 SFTP')}</span><Button isIconOnly type="button" variant="ghost" className="icon-button" aria-label={t('收起快速 SFTP')} onPress={() => setOpen(false)}><X size={18} /></Button></header>
       <SftpEndpoint side="quick" compact identity={identity} preferences={preferences} session={fileSession} initialContext={session.context} dirty={dirty} connecting={connecting} connectionError={error}

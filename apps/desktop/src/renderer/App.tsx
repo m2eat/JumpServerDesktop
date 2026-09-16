@@ -1553,6 +1553,7 @@ export default function App() {
               return <article className={`workspace-slot ${visiblePane ? `is-${visiblePane}` : 'is-hidden'} ${paneFocus === visiblePane ? 'is-focused' : ''}`} key={tab.id} aria-hidden={!visiblePane} inert={!visiblePane} onMouseDown={() => visiblePane && setPaneFocus(visiblePane)}>
                 <div className="split-caption"><SessionIcon kind={session.kind} size={13} /><strong>{session.context.assetName}</strong><span>{session.context.accountName}</span><i className={`connection-indicator is-${session.phase}`} /></div>
                 <div className="pane-content">{session.kind === 'terminal' ? <TerminalWorkspace session={session} identity={identity} preferences={preferences}
+                  onReconnect={() => void openRecent(session.context)} reconnecting={openingSessionKinds.includes(session.kind)}
                   fileSession={sessionById.get(fileSlots[`quick:${session.id}`]) ?? null}
                   dirty={dirtySessionIds.includes(fileSlots[`quick:${session.id}`])}
                   onConnect={(context) => openFileSlot(`quick:${session.id}`, context)} onDisconnect={() => releaseFileSlot(`quick:${session.id}`)}
