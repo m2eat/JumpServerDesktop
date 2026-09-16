@@ -97,7 +97,9 @@ if (!primaryInstance) app.quit();
 
 async function createWindow(): Promise<void> {
   await setNativeLanguage('system', app.getLocale());
-  const window = new BrowserWindow({ width: 1440, height: 900, minWidth: 1024, minHeight: 680, show: false, backgroundColor: '#1e2031', title: 'JumpServer Desktop', titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default', ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 14, y: 21 } } : {}), webPreferences: { preload: join(import.meta.dirname, '../preload/index.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, spellcheck: false } });
+  const icon = join(app.isPackaged ? process.resourcesPath : app.getAppPath() + '/build', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
+  if (!app.isPackaged && process.platform === 'darwin') app.dock?.setIcon(icon);
+  const window = new BrowserWindow({ icon, width: 1440, height: 900, minWidth: 1024, minHeight: 680, show: false, backgroundColor: '#1e2031', title: 'JumpServer Desktop', titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default', ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 14, y: 21 } } : {}), webPreferences: { preload: join(import.meta.dirname, '../preload/index.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, spellcheck: false } });
   const localFiles = new LocalFiles();
   let eventPort: MessagePortMain | undefined;
   const registry = new SessionRegistry(

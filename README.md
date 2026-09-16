@@ -1,5 +1,7 @@
 # JumpServer Desktop
 
+<img src="build/icon.svg" alt="JumpServer Desktop 层叠工作台图标" width="96" height="96">
+
 面向 JumpServer 社区版的跨平台桌面工作台，提供内嵌终端、SFTP 文件管理和 MySQL 数据库操作。
 
 **这是非官方社区项目，与 JumpServer 官方没有隶属或背书关系。** 当前版本为早期版本；生产部署的 OAuth、组织权限、网关主机密钥与 Chen 行为需要按实际环境验收。
@@ -114,6 +116,14 @@ pnpm dist            # 当前平台安装包，不发布
 
 请在目标系统的原生环境打包；三平台正式产物由 GitHub Actions 各自的原生 runner 生成。
 
+### 应用图标
+
+采用「层叠工作台」：青绿色等距层叠与前景终端窗口，呼应 JumpServer 的视觉元素，并区分非官方桌面客户端身份。
+
+唯一矢量源文件为 `build/icon.svg`。修改后运行 `pnpm icons`，重新生成 Windows `build/icon.ico`、macOS `build/icon.icns`、运行窗口 `build/icon.png` 和 Linux `build/icons/` 多尺寸 PNG；生成资源应与源文件一并提交，正常构建不要求重新生成图标。
+
+设计候选与选型结论保存在归档分支 [`prototype/icon-study`](https://github.com/m2eat/JumpServerDesktop/tree/prototype/icon-study)，不进入正式应用。图标仅表达项目关联，不代表 JumpServer 官方背书。
+
 开发实例使用独立配置目录和 `out-dev/`，避免与正式应用混用。可用环境变量：
 
 | 变量 | 用途 |
@@ -146,7 +156,7 @@ sources/reference-manifest.json  上游只读参考版本和许可观察记录
 发布下一版本前，先完成代码提交并保持工作区干净：
 
 ```sh
-pnpm release:version 0.1.3
+pnpm release:version 0.1.4
 git push origin main --follow-tags
 ```
 

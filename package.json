@@ -26,6 +26,7 @@
   "main": "out/main/index.js",
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "icons": "node scripts/generate-icons.mjs",
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit",
@@ -47,7 +48,8 @@
       }
     ],
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
     "artifactName": "${name}-${version}-${os}-${arch}.${ext}",
     "publish": [
@@ -63,10 +65,15 @@
       "package.json",
       "LICENSE"
     ],
+    "extraResources": [
+      { "from": "build/icon.png", "to": "icon.png" },
+      { "from": "build/icon.ico", "to": "icon.ico" }
+    ],
     "asarUnpack": [
       "**/font-list/libs/**"
     ],
     "mac": {
+      "icon": "build/icon.icns",
       "category": "public.app-category.developer-tools",
       "identity": null,
       "hardenedRuntime": false,
@@ -76,11 +83,13 @@
       ]
     },
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis"
       ]
     },
     "linux": {
+      "icon": "build/icons",
       "target": [
         "AppImage",
         "deb"
@@ -110,6 +119,7 @@
     "zod": "4.6.2"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "2.6.2",
     "@tailwindcss/vite": "4.3.3",
     "@types/node": "22.20.2",
     "@types/react": "19.3.0",
