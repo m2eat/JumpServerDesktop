@@ -1,6 +1,6 @@
 {
   "name": "jumpserver-desktop",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "JumpServer community desktop workstation",
   "engines": {
     "node": ">=24.0.0"
@@ -66,8 +66,14 @@
       "LICENSE"
     ],
     "extraResources": [
-      { "from": "build/icon.png", "to": "icon.png" },
-      { "from": "build/icon.ico", "to": "icon.ico" }
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      },
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
+      }
     ],
     "asarUnpack": [
       "**/font-list/libs/**"
