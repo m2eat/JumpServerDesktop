@@ -34,12 +34,12 @@
 
 | 系统 | 架构 | 安装包 | 更新方式 |
 | --- | --- | --- | --- |
-| Windows | x64 | NSIS `.exe` | 应用内检查、下载，确认后重启安装 |
-| Linux | x64 | `.AppImage` | 从 AppImage 启动时支持应用内下载与安装 |
+| Windows | x64 | NSIS `.exe` | 自动检查、可选自动下载，确认后重启安装 |
+| Linux | x64 | `.AppImage` | 从 AppImage 启动时支持自动检查、可选自动下载与确认安装 |
 | Linux | x64 | `.deb` | 从发布页下载新版，使用系统包管理器安装 |
 | macOS | Apple Silicon arm64、Intel x64 | `.dmg`、`.zip` | 检查版本后从发布页下载，手动替换应用 |
 
-**当前产物未配置发行者代码签名，macOS 也未公证。** Windows SmartScreen 或 macOS Gatekeeper 可能提示未知发行者／阻止启动。请核对下载来源和校验值，再根据组织的安全策略处理；本项目不会关闭系统保护、禁用 Electron sandbox 或绕过签名校验。需要受信发行者签名的组织不应直接部署这些未签名包。
+**当前产物未配置发行者代码签名，macOS 也未公证。** Windows SmartScreen 或 macOS Gatekeeper 可能提示未知发行者／阻止启动。请核对下载来源和校验值，再根据组织的安全策略处理；应用不会自行修改系统信任策略、关闭全局 Gatekeeper 或禁用 Electron sandbox。需要受信发行者签名的组织不应直接部署这些未签名包。
 
 Windows 运行安装程序；macOS 按 CPU 架构选择 DMG，将应用复制到 Applications。Linux AppImage 首次使用需要赋予执行权限：
 
@@ -70,6 +70,20 @@ Get-FileHash .\jumpserver-desktop-*.exe -Algorithm SHA256
 ```
 
 校验和可检测下载损坏，但不能替代发行者签名；安装包和校验文件都必须来自可信发布页。
+
+### macOS 手动安装与隔离提示 / Manual installation and quarantine
+
+macOS 目前不能在应用内自动安装更新。按 CPU 架构下载新版，退出应用后将其复制到 `/Applications`，手动替换旧版本。
+
+若确认安装包与 `SHA256SUMS` 均来自本仓库正式发布页、校验值一致，且复制后仍因隔离属性被 macOS 拦截，可在终端**手动**运行以下命令（工具名是 `xattr`，不是 `xttr`）：
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/JumpServer Desktop.app"
+```
+
+此操作仅移除该应用及其内部文件的隔离属性，**不等于获得 Apple 信任，也不会完成签名或公证**。不要对整个 `/Applications` 或下载目录执行，不要关闭全局 Gatekeeper。若提示权限不足，先检查安装位置与文件权限，不要直接改用 `sudo`。组织策略禁止未签名应用时，请停止安装并联系管理员。设置页也提供相同提示和“复制命令”，不会执行此命令。
+
+**English:** macOS updates currently require a manual download and replacement in `/Applications` after quitting the app. Only use the command above if the installer and `SHA256SUMS` come from this repository’s official release page, the checksum matches, and macOS still blocks the copied app because of quarantine. It removes quarantine only from this app and its contents; it does not sign, notarize, or make the app Apple-trusted. Never target the whole Applications/downloads directory or disable Gatekeeper globally. Resolve permission errors before considering elevated privileges, and follow your organization’s policy. The app only displays/copies the command; it never executes it.
 
 ## 连接 JumpServer
 
@@ -103,11 +117,15 @@ Get-FileHash .\jumpserver-desktop-*.exe -Algorithm SHA256
 
 打开 **设置 → 关于与更新**：
 
-- “检查更新”只检查本仓库正式发布的稳定版本，开发环境不访问更新服务。
-- Windows NSIS 和 Linux AppImage 用户选择“下载更新”，下载完成后再选择“重启并安装”。
-- 不自动下载，不在普通退出时偷偷安装；安装前要求确认，活动连接、传输和未保存编辑受退出保护。当前设置有草稿时先保存或恢复。
-- macOS 未签名包及 Linux deb 使用“GitHub 发布页”手动下载，不伪称支持自动安装。
-- 检查失败、下载失败和进度在界面中显示；离线不会被误报为“已是最新版”。
+- 默认启用“自动检查更新”：启动并加载设备设置 15 秒后首次检查，之后每轮检查结束 6 小时后再次检查。仅访问本仓库正式稳定版本；开发环境不访问更新服务。
+- “自动下载更新”默认关闭。Windows NSIS 和 Linux AppImage 可开启；发现新版后自动下载，或在已有新版时保存该设置立即开始下载。关闭不会取消已开始的下载。
+- 两个选项随“保存并应用”持久化为设备设置，不随登录身份变化；关闭自动检查后仍可手动“检查更新”。已有设备设置会保留并补齐新选项。
+- 发现新版或下载完成时，窗口顶部显示常驻更新入口，可跳转设置查看版本和发布说明，不打断当前连接。
+- 下载完成后必须选择“重启并安装”并确认；不会强制重启或在普通退出时安装。活动连接、传输和未保存编辑受退出保护；当前设置有草稿时须先保存或恢复。
+- macOS 未签名包及 Linux deb 可自动检查，但仍通过“查看更新说明”进入发布页手动下载，不提供应用内自动安装。macOS 隔离处理见上方说明。
+- 检查失败、下载失败和进度在设置页显示；后台失败不弹出打断工作的通知，离线不误报为“已是最新版”，可以手动重试。
+
+**English:** Automatic checks are enabled by default: the first check runs 15 seconds after startup settings load, then 6 hours after each scheduled check completes. Automatic downloads are opt-in for Windows NSIS and Linux AppImage; disabling the preference does not cancel an active download. Both settings persist across login changes. A persistent update entry opens Settings when a new version is available or downloaded. Installation always requires explicit restart confirmation and never occurs on normal quit. macOS unsigned builds and Linux deb remain manual-install only; background failures remain visible in Settings without interrupting work.
 
 版本来源是 `package.json` 与匹配的 Git 标签 `vX.Y.Z`，不是运行时执行 `git pull`。安装包不包含 Git，也不依赖用户机器的 GitHub 凭据。更新不改变 JumpServer 的登录、连接或数据库授权规则。
 

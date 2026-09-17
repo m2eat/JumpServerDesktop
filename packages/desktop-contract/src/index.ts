@@ -128,6 +128,8 @@ export interface Preferences {
   databaseRowDensity: 'comfortable' | 'compact';
   theme: ThemeSetting;
   language: LanguageSetting;
+  autoCheckUpdates: boolean;
+  autoDownloadUpdates: boolean;
   favorites: string[];
   recent: ResourceContext[];
 }

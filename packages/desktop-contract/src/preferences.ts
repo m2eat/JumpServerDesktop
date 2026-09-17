@@ -31,7 +31,9 @@ export const preferenceSettingsSchema = z.object({
     'github-light',
     'system'
   ]),
-  language: z.enum(['system', 'zh-CN', 'en-US'])
+  language: z.enum(['system', 'zh-CN', 'en-US']),
+  autoCheckUpdates: z.boolean(),
+  autoDownloadUpdates: z.boolean()
 }).strict() satisfies z.ZodType<PreferenceSettings>;
 
 export function defaultPreferenceSettings(): PreferenceSettings {
@@ -54,7 +56,9 @@ export function defaultPreferenceSettings(): PreferenceSettings {
     databaseResultFontSize: 12,
     databaseRowDensity: 'comfortable',
     theme: 'jumpserver',
-    language: 'system'
+    language: 'system',
+    autoCheckUpdates: true,
+    autoDownloadUpdates: false
   };
 }
 

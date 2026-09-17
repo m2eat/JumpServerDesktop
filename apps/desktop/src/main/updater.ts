@@ -1,5 +1,5 @@
 import electronUpdater, { type AppUpdater, type ProgressInfo, type UpdateInfo } from 'electron-updater';
-import type { AppUpdateState } from '../../../../packages/desktop-contract/src/index';
+import type { AppUpdateState, PreferenceSettings } from '../../../../packages/desktop-contract/src/index';
 
 const RELEASE_PAGE = 'https://github.com/m2eat/JumpServerDesktop/releases/latest';
 
@@ -15,6 +15,9 @@ export const trustedReleaseUrl = trustedReleasePage();
 
 type UpdateMode = Pick<AppUpdateState, 'mode' | 'reason'>;
 type StateDetails = Omit<AppUpdateState, 'currentVersion' | 'mode' | 'reason' | 'releaseUrl'>;
+
+const INITIAL_AUTOMATIC_CHECK_DELAY = 15_000;
+const AUTOMATIC_CHECK_INTERVAL = 6 * 60 * 60 * 1_000;
 
 export interface AppUpdateServiceOptions {
   currentVersion: string;
@@ -54,15 +57,19 @@ export class AppUpdateService {
   private state: AppUpdateState;
   private checkInFlight: Promise<AppUpdateState> | undefined;
   private downloadInFlight: Promise<AppUpdateState> | undefined;
+  private automaticCheckTimer: NodeJS.Timeout | undefined;
+  private automaticChecksEnabled = false;
+  private automaticDownloadsEnabled = false;
   private installRequested = false;
   private listening = false;
   private disposed = false;
 
   private readonly onChecking = (): void => {
+    if (this.disposed) return;
     if (this.state.phase === 'idle' || this.state.phase === 'not-available' || this.state.phase === 'error' || this.state.phase === 'available') this.replace({ phase: 'checking' });
   };
   private readonly onAvailable = (info: UpdateInfo): void => {
-    if (this.state.phase !== 'checking') return;
+    if (this.disposed || this.state.phase !== 'checking') return;
     const latestVersion = updateVersion(info);
     if (!latestVersion) {
       this.fail(new Error('更新元数据缺少版本号'));
@@ -71,18 +78,19 @@ export class AppUpdateService {
     this.replace({ phase: 'available', latestVersion });
   };
   private readonly onNotAvailable = (): void => {
-    if (this.state.phase === 'checking') this.replace({ phase: 'not-available' });
+    if (!this.disposed && this.state.phase === 'checking') this.replace({ phase: 'not-available' });
   };
   private readonly onProgress = (progress: ProgressInfo): void => {
-    if (this.mode.mode !== 'automatic' || this.state.phase !== 'downloading' || !Number.isFinite(progress.percent)) return;
+    if (this.disposed || this.mode.mode !== 'automatic' || this.state.phase !== 'downloading' || !Number.isFinite(progress.percent)) return;
     this.replace({ phase: 'downloading', latestVersion: this.state.latestVersion, progress: Math.max(0, Math.min(100, progress.percent)) });
   };
   private readonly onDownloaded = (info: UpdateInfo): void => {
-    if (this.mode.mode !== 'automatic' || (this.state.phase !== 'downloading' && this.state.phase !== 'available')) return;
+    if (this.disposed || this.mode.mode !== 'automatic' || (this.state.phase !== 'downloading' && this.state.phase !== 'available')) return;
     const latestVersion = updateVersion(info) ?? this.state.latestVersion;
     this.replace({ phase: 'downloaded', ...(latestVersion ? { latestVersion } : {}) });
   };
   private readonly onError = (error: Error): void => {
+    if (this.disposed) return;
     if (this.installRequested) {
       this.installRequested = false;
       this.fail(error);
@@ -113,34 +121,45 @@ export class AppUpdateService {
     return { ...this.state };
   }
 
+  configure(preferences: Pick<PreferenceSettings, 'autoCheckUpdates' | 'autoDownloadUpdates'>): void {
+    if (this.disposed) return;
+
+    const automaticChecksEnabled = this.mode.mode !== 'disabled' && preferences.autoCheckUpdates;
+    const automaticDownloadsEnabled = this.mode.mode === 'automatic' && preferences.autoDownloadUpdates;
+    const checksWereEnabled = this.automaticChecksEnabled;
+    this.automaticChecksEnabled = automaticChecksEnabled;
+    this.automaticDownloadsEnabled = automaticDownloadsEnabled;
+
+    if (!automaticChecksEnabled) this.cancelAutomaticCheck();
+    else if (!checksWereEnabled) this.scheduleAutomaticCheck(INITIAL_AUTOMATIC_CHECK_DELAY);
+
+    this.startAutomaticDownloadIfEnabled();
+  }
+
   isInstallReady(): boolean {
-    return this.mode.mode === 'automatic' && this.state.phase === 'downloaded' && !this.installRequested;
+    return !this.disposed && this.mode.mode === 'automatic' && this.state.phase === 'downloaded' && !this.installRequested;
   }
 
   check(): Promise<AppUpdateState> {
+    if (this.disposed || this.mode.mode === 'disabled' || this.downloadInFlight || this.state.phase === 'downloading' || this.state.phase === 'downloaded') return Promise.resolve(this.snapshot());
     if (this.checkInFlight) return this.checkInFlight;
-    if (this.mode.mode === 'disabled' || this.state.phase === 'downloading' || this.state.phase === 'downloaded') return Promise.resolve(this.snapshot());
 
     const inFlight = this.runCheck();
     this.checkInFlight = inFlight;
-    void inFlight.then(() => {
-      if (this.checkInFlight === inFlight) this.checkInFlight = undefined;
-    });
+    void inFlight.then(
+      () => this.completeCheck(inFlight),
+      () => this.completeCheck(inFlight)
+    );
     return inFlight;
   }
 
   download(): Promise<AppUpdateState> {
+    if (this.disposed || this.mode.mode !== 'automatic') return Promise.resolve(this.snapshot());
     if (this.downloadInFlight) return this.downloadInFlight;
-    if (this.mode.mode !== 'automatic' || this.state.phase === 'downloaded' || this.state.phase === 'downloading') return Promise.resolve(this.snapshot());
-    if (this.checkInFlight) return this.checkInFlight.then(() => this.download());
+    if (this.state.phase === 'downloaded' || this.state.phase === 'downloading') return Promise.resolve(this.snapshot());
+    if (this.checkInFlight) return this.downloadAfterCheck(this.checkInFlight);
     if (this.state.phase !== 'available') return Promise.resolve(this.snapshot());
-
-    const inFlight = this.runDownload();
-    this.downloadInFlight = inFlight;
-    void inFlight.then(() => {
-      if (this.downloadInFlight === inFlight) this.downloadInFlight = undefined;
-    });
-    return inFlight;
+    return this.startDownload();
   }
 
   install(): boolean {
@@ -162,6 +181,10 @@ export class AppUpdateService {
   }
 
   dispose(): void {
+    this.disposed = true;
+    this.automaticChecksEnabled = false;
+    this.automaticDownloadsEnabled = false;
+    this.cancelAutomaticCheck();
     if (this.listening) {
       this.options.updater.removeListener('checking-for-update', this.onChecking);
       this.options.updater.removeListener('update-available', this.onAvailable);
@@ -171,13 +194,74 @@ export class AppUpdateService {
       this.options.updater.removeListener('error', this.onError);
     }
     this.listening = false;
-    this.disposed = true;
+  }
+
+  private completeCheck(inFlight: Promise<AppUpdateState>): void {
+    if (this.checkInFlight !== inFlight) return;
+    this.checkInFlight = undefined;
+    this.startAutomaticDownloadIfEnabled();
+  }
+
+  private startAutomaticDownloadIfEnabled(): void {
+    if (this.disposed || !this.automaticDownloadsEnabled || this.checkInFlight || this.downloadInFlight || this.state.phase !== 'available') return;
+    void this.download();
+  }
+
+  private scheduleAutomaticCheck(delay: number): void {
+    if (this.disposed || !this.automaticChecksEnabled || this.automaticCheckTimer) return;
+    this.automaticCheckTimer = setTimeout(() => {
+      this.automaticCheckTimer = undefined;
+      if (this.disposed || !this.automaticChecksEnabled) return;
+      const inFlight = this.check();
+      void inFlight.then(
+        () => this.scheduleAutomaticCheck(AUTOMATIC_CHECK_INTERVAL),
+        () => this.scheduleAutomaticCheck(AUTOMATIC_CHECK_INTERVAL)
+      );
+    }, delay);
+  }
+
+  private cancelAutomaticCheck(): void {
+    if (!this.automaticCheckTimer) return;
+    clearTimeout(this.automaticCheckTimer);
+    this.automaticCheckTimer = undefined;
+  }
+
+  private downloadAfterCheck(checkInFlight: Promise<AppUpdateState>): Promise<AppUpdateState> {
+    let inFlight!: Promise<AppUpdateState>;
+    inFlight = (async () => {
+      await checkInFlight;
+      if (this.downloadInFlight !== inFlight || this.disposed || this.mode.mode !== 'automatic' || this.state.phase !== 'available') return this.snapshot();
+      return this.runDownload();
+    })();
+    this.downloadInFlight = inFlight;
+    void inFlight.then(
+      () => this.completeDownload(inFlight),
+      () => this.completeDownload(inFlight)
+    );
+    return inFlight;
+  }
+
+  private startDownload(): Promise<AppUpdateState> {
+    const inFlight = this.runDownload();
+    this.downloadInFlight = inFlight;
+    void inFlight.then(
+      () => this.completeDownload(inFlight),
+      () => this.completeDownload(inFlight)
+    );
+    return inFlight;
+  }
+
+  private completeDownload(inFlight: Promise<AppUpdateState>): void {
+    if (this.downloadInFlight !== inFlight) return;
+    this.downloadInFlight = undefined;
   }
 
   private async runCheck(): Promise<AppUpdateState> {
+    if (this.disposed) return this.snapshot();
     this.replace({ phase: 'checking' });
     try {
       const result = await this.options.updater.checkForUpdates();
+      if (this.disposed) return this.snapshot();
       if (this.state.phase === 'checking') {
         if (!result) this.fail(new Error('更新检查当前不可用，请稍后重试。'));
         else {
@@ -187,19 +271,20 @@ export class AppUpdateService {
         }
       }
     } catch (error) {
-      if (this.state.phase === 'checking') this.fail(error);
+      if (!this.disposed && this.state.phase === 'checking') this.fail(error);
     }
     return this.snapshot();
   }
 
   private async runDownload(): Promise<AppUpdateState> {
+    if (this.disposed || this.mode.mode !== 'automatic') return this.snapshot();
     const latestVersion = this.state.latestVersion;
     this.replace({ phase: 'downloading', ...(latestVersion ? { latestVersion } : {}), progress: 0 });
     try {
       await this.options.updater.downloadUpdate();
-      if (this.state.phase === 'downloading') this.replace({ phase: 'downloaded', ...(latestVersion ? { latestVersion } : {}) });
+      if (!this.disposed && this.state.phase === 'downloading') this.replace({ phase: 'downloaded', ...(latestVersion ? { latestVersion } : {}) });
     } catch (error) {
-      if (this.state.phase === 'downloading') this.fail(error);
+      if (!this.disposed && this.state.phase === 'downloading') this.fail(error);
     }
     return this.snapshot();
   }

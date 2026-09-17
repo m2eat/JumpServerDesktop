@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent, ReactNode } from 'react';
 import { Button, ComboBox, Input, Label, ListBox, Select, Switch } from '@heroui/react';
 import { Check, CircleAlert, LoaderCircle, RefreshCw, RotateCcw, Save } from 'lucide-react';
-import type { PreferenceSettings, Preferences } from '@shared/index';
+import type { AppUpdateState, PreferenceSettings, Preferences } from '@shared/index';
 import { defaultPreferenceSettings, preferenceSettingsSchema } from '@shared/preferences';
 import { useI18n } from '../i18n';
 import { themes } from '../themes';
@@ -11,6 +11,8 @@ import './SettingsPage.css';
 
 interface SettingsPageProps {
   preferences: Preferences;
+  update: AppUpdateState | null;
+  updateLoadError: boolean;
   onSave: (settings: PreferenceSettings) => Promise<boolean>;
   onNotify: (message: string, tone: 'success' | 'error') => void;
   siteSection?: ReactNode;
@@ -69,6 +71,8 @@ function settingsEqual(left: PreferenceSettings, right: PreferenceSettings): boo
     && left.databaseShowLineNumbers === right.databaseShowLineNumbers
     && left.databaseResultFontSize === right.databaseResultFontSize
     && left.databaseRowDensity === right.databaseRowDensity
+    && left.autoCheckUpdates === right.autoCheckUpdates
+    && left.autoDownloadUpdates === right.autoDownloadUpdates
     && left.theme === right.theme
     && left.language === right.language;
 }
@@ -221,9 +225,11 @@ function FontFamilyControl({ id, label, locale, value, fonts, state, pending, on
   </div>;
 }
 
-export default function SettingsPage({ preferences, onNotify, onSave, siteSection }: SettingsPageProps): ReactNode {
+export default function SettingsPage({ preferences, update, updateLoadError, onNotify, onSave, siteSection }: SettingsPageProps): ReactNode {
   const { t, locale } = useI18n();
   const incomingSettings = useMemo(() => settingsFromPreferences(preferences), [
+    preferences.autoCheckUpdates,
+    preferences.autoDownloadUpdates,
     preferences.databasePageSize,
     preferences.databaseResultFontSize,
     preferences.databaseRowDensity,
@@ -323,10 +329,10 @@ export default function SettingsPage({ preferences, onNotify, onSave, siteSectio
         </div>
       </div>
     </header>
-    <AppUpdateSection installBlocked={dirty || pending} onNotify={onNotify} />
 
     <form id="settings-preferences-form" className="preferences-form" onSubmit={(event) => void submit(event)} aria-busy={pending} noValidate>
       <fieldset className="settings-controls" disabled={pending}>
+      <AppUpdateSection update={update} loadError={updateLoadError} preferences={draft} pending={pending} installBlocked={dirty || pending} onPreferencesChange={updateDraft} onNotify={onNotify} />
       <section className="settings-section" aria-labelledby="appearance-settings-title">
         <div className="settings-section-heading"><div><h2 id="appearance-settings-title">{t('外观与语言')}</h2><p>{t('选择应用主题和显示语言。主题将在保存后应用。')}</p></div></div>
         <div className="settings-grid">

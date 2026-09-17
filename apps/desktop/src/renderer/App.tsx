@@ -6,11 +6,12 @@ import {
   ArrowRight, Bell, Check, ChevronRight, CircleAlert, Database, FolderOpen,
   History, KeyRound, LayoutGrid, LayoutPanelLeft, List, LoaderCircle, LogIn,
   LogOut, PanelRight, Plus, RefreshCw, Search, Server, Settings, ShieldCheck,
-  SlidersHorizontal, Star, TerminalSquare, X, type LucideIcon
+  SlidersHorizontal, Star, TerminalSquare, X, Download, type LucideIcon
 } from 'lucide-react';
 import type {
   Account,
   AppEvent,
+  AppUpdateState,
   Asset,
   AssetGroup,
   Capability,
@@ -338,6 +339,8 @@ export default function App() {
   const [pickerAssets, setPickerAssets] = useState<Asset[]>([]);
   const [pickerAssetState, setPickerAssetState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [appUpdate, setAppUpdate] = useState<AppUpdateState | null>(null);
+  const [appUpdateLoadError, setAppUpdateLoadError] = useState(false);
 
   const identityRef = useRef<Identity | null>(null);
   const fileSlotsRef = useRef<Record<string, string>>({});
@@ -362,6 +365,12 @@ export default function App() {
   const identityBusyRef = useRef(false);
   const groupNavigationRef = useRef(0);
   const pendingGroupRestoreRef = useRef<Pick<AssetGroup, 'id' | 'key'> | null>(null);
+  const appUpdateRevisionRef = useRef(0);
+  const applyAppUpdate = useCallback((update: AppUpdateState) => {
+    appUpdateRevisionRef.current++;
+    setAppUpdate(update);
+    setAppUpdateLoadError(false);
+  }, []);
   const closeAssetDetails = useCallback(() => {
     groupNavigationRef.current++;
     pendingGroupRestoreRef.current = null;
@@ -414,6 +423,7 @@ export default function App() {
     () => tasks.filter((task) => task.phase === 'queued' || task.phase === 'transferring'),
     [tasks]
   );
+  const globalUpdate = useMemo(() => appUpdate?.phase === 'available' || appUpdate?.phase === 'downloaded' ? appUpdate : null, [appUpdate]);
   const scopedRecent = useMemo(() => {
     if (identity === null) {
       return [];
@@ -434,6 +444,10 @@ export default function App() {
     }, 5200);
 
     toastTimerRef.current.add(timer);
+  }, []);
+  const openUpdateSettings = useCallback(() => {
+    setSidebarView('settings');
+    setScreen('library');
   }, []);
   const groupScope = getScopeKey(identity);
   const { restoreGroup, refreshPath, resolvePath, refresh: refreshGroups } = groups;
@@ -1098,10 +1112,32 @@ export default function App() {
   }, [loadSnapshot]);
 
   useEffect(() => {
+    let active = true;
+    const requestRevision = appUpdateRevisionRef.current;
+    void window.desktop.invoke('app.updates', {}).then((response) => {
+      if (!active || requestRevision !== appUpdateRevisionRef.current) return;
+      const parsed = appUpdateStateSchema.safeParse(response);
+      if (!parsed.success) {
+        setAppUpdateLoadError(true);
+        return;
+      }
+      setAppUpdate(parsed.data);
+      setAppUpdateLoadError(false);
+    }).catch(() => {
+      if (active && requestRevision === appUpdateRevisionRef.current) setAppUpdateLoadError(true);
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
     const unsubscribe = window.desktop.subscribe((event) => {
       const parsed = appEventSchema.safeParse(event);
       if (!parsed.success) {
         addToast(t('收到无法识别的桌面事件，已忽略该事件。'), 'error');
+        return;
+      }
+      if (parsed.data.type === 'update') {
+        applyAppUpdate(parsed.data.update);
         return;
       }
       if (parsed.data.type === 'identity') {
@@ -1135,7 +1171,7 @@ export default function App() {
       }
     });
     return unsubscribe;
-  }, [addToast, applyIdentity]);
+  }, [addToast, applyAppUpdate, applyIdentity]);
 
 
   useEffect(() => {
@@ -1347,6 +1383,9 @@ export default function App() {
           {screen === 'new' && <div className="connection-tab is-selected new-tab-label"><span>{t('新标签页')}</span><Button variant="tertiary" className="tab-close" type="button" isIconOnly aria-label={t('关闭新标签页')} onPress={browseHosts}><X size={14} /></Button></div>}
         </div>
         <Button variant="tertiary" className="chrome-button new-tab-button" type="button" isIconOnly aria-label={t('新建标签页')}  onPress={() => setScreen('new')} render={(buttonProps) => <button {...buttonProps} title={t('新建标签页')} />} > <Plus size={22} /></Button>
+        {globalUpdate && <Button variant="tertiary" className="update-entry" type="button" onPress={openUpdateSettings} render={(buttonProps) => <button {...buttonProps} title={globalUpdate.phase === 'downloaded' ? t('更新 {{version}} 已下载，打开设置', { version: globalUpdate.latestVersion ?? '' }) : t('更新 {{version}} 可用，打开设置', { version: globalUpdate.latestVersion ?? '' })} />}>
+          <Download size={16} aria-hidden="true" /><span>{globalUpdate.phase === 'downloaded' ? t('更新 {{version}} 已下载，打开设置', { version: globalUpdate.latestVersion ?? '' }) : t('更新 {{version}} 可用，打开设置', { version: globalUpdate.latestVersion ?? '' })}</span>
+        </Button>}
         <div className="window-actions">
           <Button variant="tertiary" className="chrome-button" type="button" isIconOnly ref={pickerTriggerRef}  aria-label={t('打开全局 Picker')} onPress={() => openPicker()} render={(buttonProps) => <button {...buttonProps} title={t('快速跳转 · ⌘K')} />} > <Search size={18} /></Button>
           <Popover.Root isOpen={taskDrawerOpen} onOpenChange={setTaskDrawerOpen}>
@@ -1422,7 +1461,7 @@ export default function App() {
             </div>}
 
             <div className="library-content">
-              {sidebarView === 'settings' ? <SettingsPage preferences={preferences} onSave={saveSettings} onNotify={addToast} siteSection={
+              {sidebarView === 'settings' ? <SettingsPage preferences={preferences} update={appUpdate} updateLoadError={appUpdateLoadError} onSave={saveSettings} onNotify={addToast} siteSection={
                 <section className="settings-site">
                   <h2>{t('当前站点')}</h2>
                   <strong>{selectedSite?.name ?? t('未配置站点')}</strong>

@@ -54,6 +54,9 @@ button svg { flex-shrink: 0; }
 .chrome-button:hover, .chrome-button.is-active { color: var(--text); background: var(--hover); }
 .window-actions { display: flex; gap: 5px; margin-left: auto; padding-left: 8px; }
 .activity-dot { position: absolute; width: 6px; height: 6px; top: 5px; right: 6px; border-radius: 50%; background: var(--accent); }
+.update-entry { display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 250px; height: 34px; flex-shrink: 0; padding: 0 10px; border: 1px solid var(--accent-border); border-radius: 7px; color: var(--success-text); background: var(--accent-soft); font-size: 12px; font-weight: 600; }
+.update-entry:hover { background: var(--hover); }
+.update-entry > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desktop-body { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
 .is-inactive { position: absolute !important; inset: 0; visibility: hidden; pointer-events: none; }
 

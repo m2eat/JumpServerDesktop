@@ -21,6 +21,12 @@ const preferenceRowSchema = z
   })
   .strict();
 
+// Existing device settings predate update preferences; only these new fields may be absent.
+const storedDeviceSettingsSchema = preferenceSettingsSchema.extend({
+  autoCheckUpdates: preferenceSettingsSchema.shape.autoCheckUpdates.default(true),
+  autoDownloadUpdates: preferenceSettingsSchema.shape.autoDownloadUpdates.default(false)
+});
+
 function normalizeSiteUrl(value: string): string {
   let url: URL;
   try {
@@ -127,7 +133,7 @@ export class AuthStorage {
       .get();
     if (row === undefined) return null;
     try {
-      return preferenceSettingsSchema.parse(this.parsePreferenceRow(row));
+      return storedDeviceSettingsSchema.parse(this.parsePreferenceRow(row));
     } catch {
       throw new Error('本地应用设置格式无效，无法读取');
     }

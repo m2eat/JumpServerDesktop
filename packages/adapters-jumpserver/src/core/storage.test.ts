@@ -43,6 +43,8 @@ describe('AuthStorage', () => {
     const firstPreferences = {
       ...defaultPreferences(),
       fontSize: 17,
+      autoCheckUpdates: false,
+      autoDownloadUpdates: true,
       favorites: [nativeRecent.assetId],
       recent: [nativeRecent]
     };
@@ -141,6 +143,29 @@ describe('AuthStorage', () => {
     migrated.close();
   });
 
+  it('migrates existing device settings and persists update choices without resetting other settings', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'jumpserver-desktop-storage-'));
+    temporaryDirectories.push(directory);
+    const filePath = join(directory, 'desktop.sqlite');
+    const { autoCheckUpdates: _check, autoDownloadUpdates: _download, favorites: _favorites, recent: _recent, ...legacySettings } = defaultPreferences();
+    legacySettings.fontSize = 19;
+    legacySettings.language = 'en-US';
+    const database = new DatabaseSync(filePath);
+    database.exec('CREATE TABLE device_preferences (id INTEGER PRIMARY KEY CHECK (id = 1), preferences_json TEXT NOT NULL) STRICT');
+    database.prepare('INSERT INTO device_preferences VALUES (1, ?)').run(JSON.stringify(legacySettings));
+    database.close();
+
+    const storage = new AuthStorage(filePath);
+    const migrated = storage.getPreferences(null);
+    expect(migrated).toEqual({ ...legacySettings, autoCheckUpdates: true, autoDownloadUpdates: false, favorites: [], recent: [] });
+    storage.savePreferences(null, { ...migrated, autoCheckUpdates: false, autoDownloadUpdates: true });
+    storage.close();
+
+    const reopened = new AuthStorage(filePath);
+    expect(reopened.getPreferences(null)).toEqual({ ...migrated, autoCheckUpdates: false, autoDownloadUpdates: true });
+    reopened.close();
+  });
+
   it('rejects invalid device settings and unauthenticated identity data without overwriting settings', () => {
     const directory = mkdtempSync(join(tmpdir(), 'jumpserver-desktop-storage-'));
     temporaryDirectories.push(directory);
@@ -148,6 +173,8 @@ describe('AuthStorage', () => {
     const saved = storage.savePreferences(null, { ...defaultPreferences(), fontSize: 17 });
 
     expect(() => storage.savePreferences(null, { ...saved, terminalLineHeight: 2.01 })).toThrow();
+    expect(() => storage.savePreferences(null, { ...saved, autoCheckUpdates: 'false' })).toThrow();
+    expect(() => storage.savePreferences(null, { ...saved, autoDownloadUpdates: 'true' })).toThrow();
     expect(() => storage.savePreferences(null, {
       ...saved,
       favorites: ['ef58b927-e75f-43a7-b6e0-3213590c74ed']

@@ -285,8 +285,11 @@ async function createWindow(): Promise<void> {
     }
     if (command === 'tasks.cancel') return ssh.invoke(command, raw);
     const result = await auth.invoke(command, raw);
-    if (command === 'app.bootstrap') await setNativeLanguage((result as Snapshot).preferences.language, app.getLocale());
-    else if (command === 'preferences.save') await setNativeLanguage((result as Preferences).language, app.getLocale());
+    if (command === 'app.bootstrap' || command === 'preferences.save') {
+      const preferences = command === 'app.bootstrap' ? (result as Snapshot).preferences : result as Preferences;
+      appUpdates.configure(preferences);
+      await setNativeLanguage(preferences.language, app.getLocale());
+    }
     return result;
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
