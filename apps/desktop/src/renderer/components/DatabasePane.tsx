@@ -43,6 +43,8 @@ import type {
 import { validateDbWriteValue } from '@shared/mysql-values';
 import DatabaseCellEditor from './DatabaseCellEditor';
 import { formatDateTime, t as translate, translateDiagnostic, useI18n } from '../i18n';
+import { triggerMonacoShortcut } from '../monaco-shortcuts';
+import { useShortcutScope, shortcutLabel } from '../shortcuts';
 import { useTheme } from '../themes';
 import './DatabasePane.css';
 
@@ -353,6 +355,9 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
   const theme = useTheme(preferences.theme);
   const sessionKey = `${session.id}:${session.generation}`;
   const pane = useRef<HTMLElement | null>(null);
+  const sqlEditorScope = useRef<HTMLDivElement | null>(null);
+  const resultsScope = useRef<HTMLElement | null>(null);
+  const draftScope = useRef<HTMLElement | null>(null);
   const sidebarDrag = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
   const editorDrag = useRef<{ pointerId: number; startY: number; startHeight: number } | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(230);
@@ -1232,6 +1237,69 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
     }
   }, [activeTable, canUseDatabase, dataBusy, invalidatePreview, preview, requiresBaseline, session.id, writeFrozen]);
 
+  const cancelRunningQuery = (): boolean => {
+    if (running && !cancelling && activeDataOperation.current !== null) void cancelQuery();
+    return true;
+  };
+  const refreshCurrentTable = (): boolean => {
+    if (activeTable && canUseDatabase && !dataBusy && activeDataOperation.current === null) {
+      requestTableRefresh();
+    }
+    return true;
+  };
+  const previewTableChanges = (): boolean => {
+    if (dataBusy) return true;
+    if (preview !== null || applyReport !== null) {
+      setSheetOpen(true);
+      return true;
+    }
+    if (
+      canUseDatabase
+      && activeDataOperation.current === null
+      && changes
+      && draftCount > 0
+      && cellEditor === null
+      && !writeFrozen
+      && !requiresBaseline
+    ) void requestPreview();
+    return true;
+  };
+
+  useShortcutScope(sqlEditorScope, {
+    'database.execute': () => {
+      if (editor.current?.hasTextFocus() && canUseDatabase && !dataBusy && activeDataOperation.current === null) requestExecute(true);
+      return true;
+    },
+    'database.cancel': cancelRunningQuery,
+    'editor.find': () => {
+      triggerMonacoShortcut(editor.current, 'editor.find');
+      return true;
+    },
+    'editor.replace': () => {
+      if (!dataBusy) triggerMonacoShortcut(editor.current, 'editor.replace');
+      return true;
+    },
+    'editor.format': () => {
+      if (!dataBusy) triggerMonacoShortcut(editor.current, 'editor.format');
+      return true;
+    },
+    'editor.comment': () => {
+      if (!dataBusy) triggerMonacoShortcut(editor.current, 'editor.comment');
+      return true;
+    },
+    'editor.command-palette': () => {
+      triggerMonacoShortcut(editor.current, 'editor.command-palette');
+      return true;
+    },
+  });
+  const tableShortcutHandlers = {
+    'database.cancel': cancelRunningQuery,
+    'database.refresh': refreshCurrentTable,
+    'database.preview': previewTableChanges,
+  };
+  useShortcutScope(resultsScope, tableShortcutHandlers);
+  useShortcutScope(draftScope, tableShortcutHandlers);
+
   const renderTree = (nodes: DbNode[], depth: number): ReactNode[] => nodes.flatMap((node) => {
     const opened = expanded.has(node.key);
     const loading = treeLoadingKeys.has(node.key);
@@ -1338,13 +1406,13 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
       <header className="db-toolbar">
         <div className="db-connection"><span className={`db-phase ${session.phase}`} /> <strong>{session.context.assetName}</strong><span>{session.context.protocol.toUpperCase()} · {session.context.accountName}</span></div>
         <div className="db-toolbar-actions">
-          <Button isDisabled={!canUseDatabase || dataBusy} type="button" variant="secondary" onPress={() => requestExecute(true)} render={(buttonProps) => <button {...buttonProps} title={t('执行编辑器选中 SQL；未选中时执行全文')} />} > <Play size={15} />{t('执行选中')}</Button>
+          <Button isDisabled={!canUseDatabase || dataBusy} type="button" variant="secondary" onPress={() => requestExecute(true)} render={(buttonProps) => <button {...buttonProps} title={`${t('执行编辑器选中 SQL；未选中时执行全文')} (${shortcutLabel('database.execute', preferences.shortcuts)})`} />} > <Play size={15} />{t('执行选中')}</Button>
           <Button className="db-primary-action" isDisabled={!canUseDatabase || dataBusy} type="button" variant="primary" onPress={() => requestExecute(false)}><Play size={15} />{t('执行')}</Button>
-          <Button className="db-danger-action" isDisabled={!running || cancelling} type="button" variant="danger-soft" onPress={() => void cancelQuery()}><Square size={14} />{cancelling ? t('取消中…') : t('取消')}</Button>
+          <Button className="db-danger-action" isDisabled={!running || cancelling} type="button" variant="danger-soft" onPress={() => void cancelQuery()} render={(buttonProps) => <button {...buttonProps} title={`${t('取消')} (${shortcutLabel('database.cancel', preferences.shortcuts)})`} />}><Square size={14} />{cancelling ? t('取消中…') : t('取消')}</Button>
         </div>
       </header>
 
-      <div id={`db-sql-editor-${session.id}`} className="db-editor-wrap">
+      <div ref={sqlEditorScope} id={`db-sql-editor-${session.id}`} className="db-editor-wrap">
         <Editor
           height="100%"
           defaultLanguage="sql"
@@ -1446,7 +1514,7 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
       )}
       </div>
 
-      <section id={`db-results-${session.id}`} className="db-results" aria-live="polite">
+      <section ref={resultsScope} id={`db-results-${session.id}`} className="db-results" aria-live="polite">
         <div className="db-results-heading">
           <div>
             <Table2 size={16} />
@@ -1456,7 +1524,7 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
           {activeTable && (
             <div className="db-results-controls">
               <div className="db-table-actions">
-                <Button aria-label={t('刷新表格')} isDisabled={!canUseDatabase || dataBusy} type="button" variant="tertiary" onPress={requestTableRefresh} render={(buttonProps) => <button {...buttonProps} title={t('刷新表格')} />}>
+                <Button aria-label={t('刷新表格')} isDisabled={!canUseDatabase || dataBusy} type="button" variant="tertiary" onPress={requestTableRefresh} render={(buttonProps) => <button {...buttonProps} title={`${t('刷新表格')} (${shortcutLabel('database.refresh', preferences.shortcuts)})`} />}>
                   <RefreshCw className={running ? 'db-spin' : ''} size={14} />{t('刷新')}
                 </Button>
                 {canInsert && <Button isDisabled={dataBusy || writeFrozen || requiresBaseline} type="button" variant="secondary" onPress={createInsertDraft}>
@@ -1622,7 +1690,7 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
       </section>
 
       {activeTable && (draftCount > 0 || preview !== null || applyReport !== null) && (
-        <section className={`db-draft-bar${applyReport ? ` db-draft-bar--${applyReport.result.outcome}` : ''}`} aria-label={t('更改与提交报告')}>
+        <section ref={draftScope} className={`db-draft-bar${applyReport ? ` db-draft-bar--${applyReport.result.outcome}` : ''}`} aria-label={t('更改与提交报告')}>
           <div>
             <Save size={15} />
             <strong>{applyReport
@@ -1645,6 +1713,7 @@ export default function DatabasePane({ session, preferences, onDirtyChange, onRe
                   void requestPreview();
                 }
               }}
+              render={(buttonProps) => <button {...buttonProps} title={`${applyReport ? t('查看提交报告') : t('查看并保存更改')} (${shortcutLabel('database.preview', preferences.shortcuts)})`} />}
             >
               {previewing ? <LoaderCircle className="db-spin" size={13} /> : <Save size={13} />}
               {applyReport ? t('查看提交报告') : t('查看并保存更改')}

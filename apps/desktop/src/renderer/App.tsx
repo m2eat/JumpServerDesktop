@@ -42,7 +42,8 @@ import type { QuickSwitcherEntry } from './workspace/QuickSwitcher';
 import { resourceContextForMethod, sessionKindForContext, sessionKindForMethod } from '@shared/index';
 import { defaultPreferences, preferenceSettingsSchema } from '@shared/preferences';
 import { appUpdateStateSchema } from '@shared/updates';
-import SettingsPage from './components/SettingsPage';
+import SettingsPage, { type SettingsTab } from './components/SettingsPage';
+import { shortcutLabel, useAppShortcuts } from './shortcuts';
 import { applyTheme, useTheme } from './themes';
 import { t, useI18n, setLanguage, translateDiagnostic, formatNumber } from './i18n';
 import './App.css';
@@ -329,6 +330,7 @@ export default function App() {
   const [pendingIdentityAction, setPendingIdentityAction] = useState<{ siteId: string | null } | null>(null);
   const [identityBusy, setIdentityBusy] = useState(false);
   const [sidebarView, setSidebarView] = useState<SidebarView>('assets');
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('appearance');
   const [taskDrawerOpen, setTaskDrawerOpen] = useState(false);
   const [siteDialogOpen, setSiteDialogOpen] = useState(false);
   const [siteForm, setSiteForm] = useState({ id: '', name: '', url: '', error: '' });
@@ -445,10 +447,41 @@ export default function App() {
 
     toastTimerRef.current.add(timer);
   }, []);
-  const openUpdateSettings = useCallback(() => {
+  const openSettings = useCallback(() => {
     setSidebarView('settings');
     setScreen('library');
   }, []);
+  const openShortcutSettings = useCallback(() => {
+    openSettings();
+    setSettingsTab('shortcuts');
+    window.requestAnimationFrame(() => {
+      const heading = document.getElementById('shortcut-settings-title');
+      heading?.focus({ preventScroll: true });
+    });
+  }, [openSettings]);
+  const openPicker = useCallback((query = '') => {
+    setPickerQuery(query);
+    setPickerIndex(0);
+    setPickerOpen(true);
+    window.requestAnimationFrame(() => pickerInputRef.current?.focus());
+  }, []);
+  const closePicker = useCallback(() => {
+    setPickerOpen(false);
+    setPickerQuery('');
+    window.requestAnimationFrame(() => pickerTriggerRef.current?.focus());
+  }, []);
+  const browseHosts = useCallback(() => {
+    setScreen('library');
+    setSidebarView('assets');
+  }, []);
+  const openNewTab = useCallback(() => {
+    setScreen('new');
+    setChoosingSplitTarget(false);
+  }, []);
+  const openUpdateSettings = useCallback(() => {
+    openSettings();
+    setSettingsTab('updates');
+  }, [openSettings]);
   const groupScope = getScopeKey(identity);
   const { restoreGroup, refreshPath, resolvePath, refresh: refreshGroups } = groups;
   useEffect(() => {
@@ -940,21 +973,142 @@ export default function App() {
     }
   }, [addSessionTab, addToast, persistPreferences, preferences, selectedAccount, selectedAsset]);
 
-  const executeCommand = useCallback((id: CommandId) => {
+  const selectPrimaryTab = useCallback((tabId: string) => {
+    setScreen('session');
+    setChoosingSplitTarget(false);
+    if (tabId === secondaryTabId) {
+      setSecondaryTabId(activeTabId === null ? null : activeTabId);
+    }
+    setActiveTabId(tabId);
+    setPaneFocus('primary');
+  }, [activeTabId, secondaryTabId]);
+
+  const pickTab = useCallback((tabId: string) => {
+    setScreen('session');
+    if (choosingSplitTarget) {
+      if (tabId === activeTabId) {
+        addToast(t('副窗格需要选择另一个标签，不能镜像同一个终端实例。'), 'error');
+        return;
+      }
+      setSecondaryTabId(tabId);
+      setPaneFocus('secondary');
+      setChoosingSplitTarget(false);
+      return;
+    }
+    selectPrimaryTab(tabId);
+  }, [activeTabId, addToast, choosingSplitTarget, selectPrimaryTab]);
+
+  const navigateTabs = useCallback((direction: 1 | -1): boolean => {
+    if (tabs.length === 0) {
+      openNewTab();
+      return true;
+    }
+    const tabIds = tabs.map((tab) => tab.id);
+    const currentIndex = screen === 'new' ? tabIds.length : screen === 'session' ? tabIds.indexOf(activeTabId ?? '') : -1;
+    const startIndex = currentIndex === -1 ? (direction === 1 ? -1 : 0) : currentIndex;
+    const targetIndex = (startIndex + direction + tabIds.length + 1) % (tabIds.length + 1);
+    if (targetIndex === tabIds.length) {
+      openNewTab();
+    } else {
+      selectPrimaryTab(tabIds[targetIndex]);
+    }
+    return true;
+  }, [activeTabId, openNewTab, screen, selectPrimaryTab, tabs]);
+
+  const selectNumberedTab = useCallback((index: number): boolean => {
+    const tab = index === 8 ? tabs.at(-1) : tabs[index];
+    if (!tab) return false;
+    selectPrimaryTab(tab.id);
+    return true;
+  }, [selectPrimaryTab, tabs]);
+
+  const requestCloseCurrentTab = useCallback((): boolean => {
+    if (closingTabIdRef.current !== null || pendingCloseTabId !== null) return false;
+    if (screen === 'new') {
+      browseHosts();
+      return true;
+    }
+    if (screen !== 'session') return false;
+    const tabId = paneFocus === 'secondary' && secondaryTabId !== null ? secondaryTabId : activeTabId;
+    if (tabId === null) return false;
+    setPendingCloseTabId(tabId);
+    return true;
+  }, [activeTabId, browseHosts, paneFocus, pendingCloseTabId, screen, secondaryTabId]);
+
+  const executeCommand = useCallback((id: CommandId): boolean => {
     switch (id) {
+      case 'picker.open':
+        openPicker();
+        return true;
+      case 'tabs.new':
+        openNewTab();
+        return true;
+      case 'tabs.close':
+        return requestCloseCurrentTab();
+      case 'tabs.next':
+        return navigateTabs(1);
+      case 'tabs.previous':
+        return navigateTabs(-1);
+      case 'tabs.1':
+        return selectNumberedTab(0);
+      case 'tabs.2':
+        return selectNumberedTab(1);
+      case 'tabs.3':
+        return selectNumberedTab(2);
+      case 'tabs.4':
+        return selectNumberedTab(3);
+      case 'tabs.5':
+        return selectNumberedTab(4);
+      case 'tabs.6':
+        return selectNumberedTab(5);
+      case 'tabs.7':
+        return selectNumberedTab(6);
+      case 'tabs.8':
+        return selectNumberedTab(7);
+      case 'tabs.9':
+        return selectNumberedTab(8);
+      case 'settings.open':
+        openSettings();
+        return true;
+      case 'shortcuts.open':
+        openShortcutSettings();
+        return true;
+      case 'sidebar.toggle':
+        setSidebarHidden((hidden) => !hidden);
+        return true;
       case 'assets.focus-search':
+        setSidebarHidden(false);
         setSidebarView('assets');
         setScreen('library');
         window.requestAnimationFrame(() => assetSearchRef.current?.focus());
-        return;
+        return true;
+      case 'workspace.prepare-split':
+        if (tabs.length < 2) {
+          addToast(t('先打开另一个连接，再选择要分屏的标签。'));
+          return true;
+        }
+        setScreen('session');
+        setChoosingSplitTarget(true);
+        return true;
+      case 'workspace.focus-primary':
+        setSecondaryTabId(null);
+        setPaneFocus('primary');
+        setChoosingSplitTarget(false);
+        return true;
+      case 'tasks.toggle':
+        setTaskDrawerOpen((open) => !open);
+        return true;
       case 'site.add':
         setSiteMenuOpen(false);
         setSiteForm({ id: '', name: '', url: '', error: '' });
         setSiteDialogOpen(true);
-        return;
+        return true;
       case 'auth.login':
-        if (selectedSite === null) { addToast(t('请先添加一个 JumpServer 站点。'), 'error'); return; }
-        if (identityBusyRef.current) return;
+        if (selectedSite === null) {
+          addToast(t('请先添加一个 JumpServer 站点。'), 'error');
+          return true;
+        }
+        if (identityBusyRef.current) return false;
         identityBusyRef.current = true;
         setIdentityBusy(true);
         setAuthNotice(null);
@@ -969,29 +1123,19 @@ export default function App() {
             setIdentityBusy(false);
           }
         })();
-        return;
+        return true;
       case 'auth.logout':
-        if (identityRef.current !== null) requestIdentityTransition(null);
-        return;
-      case 'workspace.prepare-split':
-        if (tabs.length < 2) { addToast(t('先打开另一个连接，再选择要分屏的标签。')); return; }
-        setScreen('session');
-        setChoosingSplitTarget(true);
-        return;
-      case 'workspace.focus-primary':
-        setSecondaryTabId(null);
-        setPaneFocus('primary');
-        setChoosingSplitTarget(false);
-        return;
-      case 'tasks.toggle':
-        setTaskDrawerOpen((open) => !open);
-        return;
-      case 'settings.open':
-        setSidebarView('settings');
-        setScreen('library');
-        return;
+        if (identityRef.current === null || identityBusyRef.current) return false;
+        requestIdentityTransition(null);
+        return true;
+      case 'app.quit':
+        void window.desktop.invoke('app.quit', {}).catch((error: unknown) => {
+          addToast(t('无法退出工作台：{{error}}', { error: getErrorMessage(error) }), 'error');
+        });
+        return true;
     }
-  }, [addToast, applyIdentity, requestIdentityTransition, selectedSite, tabs.length]);
+    return false;
+  }, [addToast, applyIdentity, navigateTabs, openNewTab, openPicker, openSettings, openShortcutSettings, requestCloseCurrentTab, requestIdentityTransition, selectNumberedTab, selectedSite, tabs.length]);
 
   const closeTab = useCallback(async (tabId: string) => {
     if (closingTabIdRef.current !== null) {
@@ -1017,7 +1161,21 @@ export default function App() {
       dirtyHandlerRef.current.delete(session.id);
       dirtySessionStateRef.current.delete(session.id);
       setDirtySessionIds((current) => current.filter((id) => id !== session.id));
+      const closingIndex = tabs.findIndex((item) => item.id === tabId);
+      const remainingTabs = tabs.filter((item) => item.id !== tabId);
       setTabs((current) => current.filter((item) => item.id !== tabId));
+      if (tabId === activeTabId) {
+        const replacement = secondaryTabId !== null && secondaryTabId !== tabId && remainingTabs.some((item) => item.id === secondaryTabId)
+          ? secondaryTabId
+          : remainingTabs[Math.min(closingIndex, remainingTabs.length - 1)]?.id ?? null;
+        setActiveTabId(replacement);
+        setSecondaryTabId(null);
+        setPaneFocus('primary');
+        if (replacement === null) setScreen('new');
+      } else if (tabId === secondaryTabId) {
+        setSecondaryTabId(null);
+        setPaneFocus('primary');
+      }
       setPendingCloseTabId(null);
     } catch (error: unknown) {
       closingTerminalIdsRef.current.delete(session.id);
@@ -1026,7 +1184,7 @@ export default function App() {
       closingTabIdRef.current = null;
       setClosingTabId(null);
     }
-  }, [addToast, releaseFileSlot, sessionById, setSessionDirty, tabs]);
+  }, [activeTabId, addToast, releaseFileSlot, secondaryTabId, sessionById, setSessionDirty, tabs]);
 
   const cancelTask = useCallback(async (task: TransferTask) => {
     if (task.cancelRequested || cancelingTaskIdsRef.current.has(task.id)) {
@@ -1070,32 +1228,22 @@ export default function App() {
   }, [locale, pickerAssets, pickerQuery, sessionById, tabs]);
 
   const activatePickerEntry = useCallback((entry: PickerEntry) => {
+    closePicker();
     if (entry.kind === 'command') {
       executeCommand(entry.command.id);
-    }
-    if (entry.kind === 'tab') {
-      if (entry.tab.id === secondaryTabId && activeTabId !== null) {
-        setSecondaryTabId(activeTabId);
-      }
-      setActiveTabId(entry.tab.id);
-      setScreen('session');
-      setPaneFocus('primary');
-      setChoosingSplitTarget(false);
-    }
-    if (entry.kind === 'asset') {
+    } else if (entry.kind === 'tab') {
+      selectPrimaryTab(entry.tab.id);
+    } else if (entry.kind === 'asset') {
       resetAssetBrowser();
       setSidebarView('assets');
       setScreen('library');
       void selectAsset(entry.asset);
+    } else if (entry.view === 'files') {
+      setScreen('sftp');
+    } else {
+      browseHosts();
     }
-    if (entry.kind === 'library') {
-      if (entry.view === 'files') setScreen('sftp');
-      else { setSidebarView('assets'); setScreen('library'); }
-    }
-    setPickerOpen(false);
-    setPickerQuery('');
-    window.requestAnimationFrame(() => pickerTriggerRef.current?.focus());
-  }, [activeTabId, executeCommand, secondaryTabId, selectAsset, resetAssetBrowser]);
+  }, [browseHosts, closePicker, executeCommand, resetAssetBrowser, selectAsset, selectPrimaryTab]);
 
 
   useEffect(() => {
@@ -1201,6 +1349,14 @@ export default function App() {
   }, [paneFocus, secondaryTabId]);
 
   useEffect(() => {
+    if (screen !== 'session') return;
+    const frame = window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>('.workspace-slot.is-focused .xterm-helper-textarea, .workspace-slot.is-focused .monaco-editor [role="textbox"]')?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeTabId, secondaryTabId, screen]);
+
+  useEffect(() => {
     setTabs((current) => {
       let changed = false;
       const next = current.map((tab) => {
@@ -1213,28 +1369,15 @@ export default function App() {
       return changed ? next : current;
     });
   }, [locale, sessionById]);
-
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.isComposing || composingRef.current) {
-        return;
-      }
-      if (event.key.toLocaleLowerCase() === 'k' && (event.metaKey || (event.ctrlKey && event.shiftKey))) {
-        event.preventDefault();
-        setPickerOpen(true);
-        window.requestAnimationFrame(() => pickerInputRef.current?.focus());
-        return;
-      }
-      if (event.key === 'Escape' && pickerOpen) {
-        event.preventDefault();
-        setPickerOpen(false);
-        setPickerQuery('');
-        window.requestAnimationFrame(() => pickerTriggerRef.current?.focus());
-      }
+      if (event.isComposing || composingRef.current || event.key !== 'Escape' || !pickerOpen) return;
+      event.preventDefault();
+      closePicker();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [pickerOpen]);
+  }, [closePicker, pickerOpen]);
 
 
   const saveSite = async (event: FormEvent<HTMLFormElement>) => {
@@ -1284,27 +1427,6 @@ export default function App() {
     if (savedPreferences !== null) refreshFavorites();
   };
 
-  const pickTab = (tabId: string) => {
-    setScreen('session');
-    if (choosingSplitTarget) {
-      if (tabId === activeTabId) {
-        addToast(t('副窗格需要选择另一个标签，不能镜像同一个终端实例。'), 'error');
-        return;
-      }
-      setSecondaryTabId(tabId);
-      setPaneFocus('secondary');
-      setChoosingSplitTarget(false);
-      return;
-    }
-    if (tabId === secondaryTabId && activeTabId !== null) {
-      setSecondaryTabId(activeTabId);
-      setActiveTabId(tabId);
-      setPaneFocus('primary');
-      return;
-    }
-    setActiveTabId(tabId);
-    setPaneFocus('primary');
-  };
 
   const closeRequestedTab = pendingCloseTabId === null ? null : tabs.find((tab) => tab.id === pendingCloseTabId) ?? null;
   const closeRequestedSession = closeRequestedTab === null ? null : sessionById.get(closeRequestedTab.sessionId) ?? null;
@@ -1318,7 +1440,10 @@ export default function App() {
   const selectedAssetMethods = selectedAsset === null ? [] : assetOptions.methods;
   const quickEntries: QuickSwitcherEntry[] = pickerEntries.map((entry) => {
     if (entry.kind === 'library') return { key: entry.key, section: t('工作区'), title: entry.title, kind: 'library' };
-    if (entry.kind === 'command') return { key: entry.key, section: entry.command.group, title: entry.command.label, detail: entry.command.description, kind: 'command' };
+    if (entry.kind === 'command') {
+      const hint = shortcutLabel(entry.command.id, preferences.shortcuts);
+      return { key: entry.key, section: entry.command.group, title: entry.command.label, detail: entry.command.description, kind: 'command', hint: hint || undefined };
+    }
     if (entry.kind === 'tab') return { key: entry.key, section: t('已打开标签'), title: entry.session.context.assetName, detail: `${entry.session.context.accountName} · ${phaseLabel(entry.session.phase)}`, kind: entry.session.kind };
     const visualKind = assetVisualKind(entry.asset);
     return {
@@ -1329,8 +1454,6 @@ export default function App() {
       kind: visualKind === 'database' ? 'database' : visualKind === 'host' ? 'terminal' : 'asset'
     };
   });
-  const openPicker = (query = '') => { setPickerQuery(query); setPickerIndex(0); setPickerOpen(true); };
-  const browseHosts = () => { setScreen('library'); setSidebarView('assets'); };
   const libraryTitle = sidebarView === 'recent' ? t('最近连接') : sidebarView === 'settings' ? t('设置') : favoritesOnly ? t('收藏的资产') : selectedGroup?.name ?? t('全部资产');
   const browseAllAssets = () => { assetBrowser.resetAll(); setSidebarView('assets'); setScreen('library'); };
   const selectAssetGroup = (_group: AssetGroup, path: AssetGroup[]) => {
@@ -1338,6 +1461,38 @@ export default function App() {
     setSidebarView('assets');
     setScreen('library');
   };
+  const shortcutTitle = (id: CommandId, label: string): string => {
+    const binding = shortcutLabel(id, preferences.shortcuts);
+    return binding ? `${label} · ${binding}` : label;
+  };
+  const appShortcutHandlers: Record<CommandId, () => boolean> = {
+    'picker.open': () => executeCommand('picker.open'),
+    'tabs.new': () => executeCommand('tabs.new'),
+    'tabs.close': () => executeCommand('tabs.close'),
+    'tabs.next': () => executeCommand('tabs.next'),
+    'tabs.previous': () => executeCommand('tabs.previous'),
+    'tabs.1': () => executeCommand('tabs.1'),
+    'tabs.2': () => executeCommand('tabs.2'),
+    'tabs.3': () => executeCommand('tabs.3'),
+    'tabs.4': () => executeCommand('tabs.4'),
+    'tabs.5': () => executeCommand('tabs.5'),
+    'tabs.6': () => executeCommand('tabs.6'),
+    'tabs.7': () => executeCommand('tabs.7'),
+    'tabs.8': () => executeCommand('tabs.8'),
+    'tabs.9': () => executeCommand('tabs.9'),
+    'settings.open': () => executeCommand('settings.open'),
+    'shortcuts.open': () => executeCommand('shortcuts.open'),
+    'sidebar.toggle': () => executeCommand('sidebar.toggle'),
+    'assets.focus-search': () => executeCommand('assets.focus-search'),
+    'workspace.prepare-split': () => executeCommand('workspace.prepare-split'),
+    'workspace.focus-primary': () => executeCommand('workspace.focus-primary'),
+    'tasks.toggle': () => executeCommand('tasks.toggle'),
+    'site.add': () => executeCommand('site.add'),
+    'auth.login': () => executeCommand('auth.login'),
+    'auth.logout': () => executeCommand('auth.logout'),
+    'app.quit': () => executeCommand('app.quit')
+  };
+  useAppShortcuts(preferences.shortcuts, appShortcutHandlers);
 
   if (bootstrapState === 'loading') {
     return (
@@ -1380,23 +1535,23 @@ export default function App() {
               <Button variant="tertiary" className="tab-close" type="button" isIconOnly aria-label={t('关闭 {{title}}', { title: tab.title })} isDisabled={closingTabId !== null} onPress={() => setPendingCloseTabId(tab.id)}><X size={14} /></Button>
             </div>;
           })}
-          {screen === 'new' && <div className="connection-tab is-selected new-tab-label"><span>{t('新标签页')}</span><Button variant="tertiary" className="tab-close" type="button" isIconOnly aria-label={t('关闭新标签页')} onPress={browseHosts}><X size={14} /></Button></div>}
+          {screen === 'new' && <div className="connection-tab is-selected new-tab-label"><span>{t('新标签页')}</span><Button variant="tertiary" className="tab-close" type="button" isIconOnly aria-label={t('关闭新标签页')} onPress={() => executeCommand('tabs.close')}><X size={14} /></Button></div>}
         </div>
-        <Button variant="tertiary" className="chrome-button new-tab-button" type="button" isIconOnly aria-label={t('新建标签页')}  onPress={() => setScreen('new')} render={(buttonProps) => <button {...buttonProps} title={t('新建标签页')} />} > <Plus size={22} /></Button>
+        <Button variant="tertiary" className="chrome-button new-tab-button" type="button" isIconOnly aria-label={shortcutTitle('tabs.new', t('新建标签页'))} onPress={() => executeCommand('tabs.new')} render={(buttonProps) => <button {...buttonProps} title={shortcutTitle('tabs.new', t('新建标签页'))} />} > <Plus size={22} /></Button>
         {globalUpdate && <Button variant="tertiary" className="update-entry" type="button" onPress={openUpdateSettings} render={(buttonProps) => <button {...buttonProps} title={globalUpdate.phase === 'downloaded' ? t('更新 {{version}} 已下载，打开设置', { version: globalUpdate.latestVersion ?? '' }) : t('更新 {{version}} 可用，打开设置', { version: globalUpdate.latestVersion ?? '' })} />}>
           <Download size={16} aria-hidden="true" /><span>{globalUpdate.phase === 'downloaded' ? t('更新 {{version}} 已下载，打开设置', { version: globalUpdate.latestVersion ?? '' }) : t('更新 {{version}} 可用，打开设置', { version: globalUpdate.latestVersion ?? '' })}</span>
         </Button>}
         <div className="window-actions">
-          <Button variant="tertiary" className="chrome-button" type="button" isIconOnly ref={pickerTriggerRef}  aria-label={t('打开全局 Picker')} onPress={() => openPicker()} render={(buttonProps) => <button {...buttonProps} title={t('快速跳转 · ⌘K')} />} > <Search size={18} /></Button>
+          <Button variant="tertiary" className="chrome-button" type="button" isIconOnly ref={pickerTriggerRef} aria-label={shortcutTitle('picker.open', t('打开全局 Picker'))} onPress={() => executeCommand('picker.open')} render={(buttonProps) => <button {...buttonProps} title={shortcutTitle('picker.open', t('快速跳转'))} />} > <Search size={18} /></Button>
           <Popover.Root isOpen={taskDrawerOpen} onOpenChange={setTaskDrawerOpen}>
-            <Button variant="tertiary" className={`chrome-button ${taskDrawerOpen ? 'is-active' : ''}`} type="button" isIconOnly  aria-label={t('切换传输任务')} render={(buttonProps) => <button {...buttonProps} title={t('传输任务')} />} > <Bell size={18} />{taskSummary.length > 0 && <i className="activity-dot" />}</Button>
+            <Button variant="tertiary" className={`chrome-button ${taskDrawerOpen ? 'is-active' : ''}`} type="button" isIconOnly aria-label={shortcutTitle('tasks.toggle', t('切换传输任务'))} render={(buttonProps) => <button {...buttonProps} title={shortcutTitle('tasks.toggle', t('传输任务'))} />} > <Bell size={18} />{taskSummary.length > 0 && <i className="activity-dot" />}</Button>
             <Popover.Content className="task-drawer" placement="bottom end" offset={7}>
               <Popover.Dialog className="task-drawer-dialog" aria-label={t('传输任务')}>
                 <TaskDrawer tasks={tasks} detachedSessions={detachedFileSessions} attachingSessionIds={attachingSessionIds} cancelingTaskIds={cancelingTaskIds} onAttach={(sessionId) => void attachSession(sessionId)} onCancel={(task) => void cancelTask(task)} onClose={() => setTaskDrawerOpen(false)} />
               </Popover.Dialog>
             </Popover.Content>
           </Popover.Root>
-          <Button variant="tertiary" className={`chrome-button ${choosingSplitTarget ? 'is-active' : ''}`} type="button" isIconOnly aria-label={secondaryTabId ? t('聚焦主窗格') : t('选择分屏标签')}  isDisabled={tabs.length < 2} onPress={() => executeCommand(secondaryTabId ? 'workspace.focus-primary' : 'workspace.prepare-split')} render={(buttonProps) => <button {...buttonProps} title={secondaryTabId ? t('结束分屏') : t('分屏')} />} > {secondaryTabId ? <LayoutPanelLeft size={18} /> : <PanelRight size={18} />}</Button>
+          <Button variant="tertiary" className={`chrome-button ${choosingSplitTarget ? 'is-active' : ''}`} type="button" isIconOnly aria-label={secondaryTabId ? shortcutTitle('workspace.focus-primary', t('聚焦主窗格')) : shortcutTitle('workspace.prepare-split', t('选择分屏标签'))} isDisabled={tabs.length < 2} onPress={() => executeCommand(secondaryTabId ? 'workspace.focus-primary' : 'workspace.prepare-split')} render={(buttonProps) => <button {...buttonProps} title={secondaryTabId ? shortcutTitle('workspace.focus-primary', t('结束分屏')) : shortcutTitle('workspace.prepare-split', t('分屏'))} />} > {secondaryTabId ? <LayoutPanelLeft size={18} /> : <PanelRight size={18} />}</Button>
         </div>
       </header>
 
@@ -1410,10 +1565,10 @@ export default function App() {
             </nav>
             <div className="library-group-slot"><AssetGroupTree groups={groups} selectedGroupId={sidebarView === 'assets' ? selectedGroup?.id ?? null : null} onSelect={selectAssetGroup} onRefresh={() => void refreshAssetLibrary()} navigationVersion={groupNavigationRef.current} /></div>
             <nav className="sidebar-bottom-nav" aria-label={t('工作台工具')}>
-              <Button variant="tertiary" className="nav-item" type="button" onPress={() => executeCommand('tasks.toggle')}><List size={18} /><span>{t('传输任务')}</span>{taskSummary.length > 0 && <small>{taskSummary.length}</small>}</Button>
-              <Button variant="tertiary" className={sidebarView === 'settings' ? 'nav-item is-selected' : 'nav-item'} type="button" onPress={() => executeCommand('settings.open')}><Settings size={18} /><span>{t('设置')}</span></Button>
+              <Button variant="tertiary" className="nav-item" type="button" onPress={() => executeCommand('tasks.toggle')} render={(buttonProps) => <button {...buttonProps} title={shortcutTitle('tasks.toggle', t('传输任务'))} />}><List size={18} /><span>{t('传输任务')}</span>{taskSummary.length > 0 && <small>{taskSummary.length}</small>}</Button>
+              <Button variant="tertiary" className={sidebarView === 'settings' ? 'nav-item is-selected' : 'nav-item'} type="button" onPress={() => executeCommand('settings.open')} render={(buttonProps) => <button {...buttonProps} title={shortcutTitle('settings.open', t('设置'))} />}><Settings size={18} /><span>{t('设置')}</span></Button>
             </nav>
-            <div className="sidebar-identity"><i className={identity ? 'is-connected' : ''} /><span>{identity?.name ?? t('尚未登录')}<small>{selectedSite?.name ?? 'JumpServer Desktop'}</small></span>{identity && <Button variant="tertiary" className="icon-button" type="button" isIconOnly  aria-label={t('注销')} isDisabled={identityBusy} onPress={() => executeCommand('auth.logout')} render={(buttonProps) => <button {...buttonProps} title={t('注销')} />} > <LogOut size={16} /></Button>}</div>
+            <div className="sidebar-identity"><i className={identity ? 'is-connected' : ''} /><span>{identity?.name ?? t('尚未登录')}<small>{selectedSite?.name ?? 'JumpServer Desktop'}</small></span>{identity && <Button variant="tertiary" className="icon-button" type="button" isIconOnly aria-label={shortcutTitle('auth.logout', t('注销'))} isDisabled={identityBusy} onPress={() => executeCommand('auth.logout')} render={(buttonProps) => <button {...buttonProps} title={shortcutTitle('auth.logout', t('注销'))} />} > <LogOut size={16} /></Button>}</div>
             <div className="sidebar-resizer" role="separator" aria-label={t('调整侧栏宽度')} aria-orientation="vertical" aria-valuemin={200} aria-valuemax={340} aria-valuenow={sidebarWidth} tabIndex={0}
               onKeyDown={(event) => {
                 if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
@@ -1429,14 +1584,14 @@ export default function App() {
           </aside>
 
           <section className="library-main">
-            {sidebarView === 'settings' && <Button variant="tertiary" className="sidebar-toggle-settings toolbar-button" onPress={() => setSidebarHidden(value => !value)}><LayoutPanelLeft size={16} />{t(sidebarHidden ? '显示侧栏' : '收起侧栏')}</Button>}
+            {sidebarView === 'settings' && <Button variant="tertiary" className="sidebar-toggle-settings toolbar-button" aria-label={shortcutTitle('sidebar.toggle', t(sidebarHidden ? '显示侧栏' : '收起侧栏'))} onPress={() => executeCommand('sidebar.toggle')} render={(buttonProps) => <button {...buttonProps} title={shortcutTitle('sidebar.toggle', t(sidebarHidden ? '显示侧栏' : '收起侧栏'))} />}><LayoutPanelLeft size={16} />{t(sidebarHidden ? '显示侧栏' : '收起侧栏')}</Button>}
             {sidebarView !== 'settings' && <div className="library-tools">
-              {sidebarView === 'assets' ? <div className="host-search input-frame"><Search size={18} /><Input variant="secondary" ref={assetSearchRef} value={assetSearch} onChange={(event) => changeAssetSearch(event.currentTarget.value)} placeholder={selectedGroup ? t('在「{{name}}」中搜索名称或地址…', { name: selectedGroup.name }) : favoritesOnly ? t('搜索收藏的资产…') : t('查找资产名称或地址…')} aria-label={t('搜索授权资产')} />{assetSearch && <Button variant="tertiary" type="button" className="icon-button" isIconOnly aria-label={t('清除搜索')} onPress={() => changeAssetSearch('')}><X size={15} /></Button>}<kbd>{t('搜索资产')}</kbd></div> : <div className="library-page-title"><h1>{libraryTitle}</h1><span>{selectedSite?.name ?? 'JumpServer Desktop'}</span></div>}
+              {sidebarView === 'assets' ? <div className="host-search input-frame"><Search size={18} /><Input variant="secondary" ref={assetSearchRef} value={assetSearch} onChange={(event) => changeAssetSearch(event.currentTarget.value)} placeholder={selectedGroup ? t('在「{{name}}」中搜索名称或地址…', { name: selectedGroup.name }) : favoritesOnly ? t('搜索收藏的资产…') : t('查找资产名称或地址…')} aria-label={t('搜索授权资产')} />{assetSearch && <Button variant="tertiary" type="button" className="icon-button" isIconOnly aria-label={t('清除搜索')} onPress={() => changeAssetSearch('')}><X size={15} /></Button>}{shortcutLabel('assets.focus-search', preferences.shortcuts) && <kbd>{shortcutLabel('assets.focus-search', preferences.shortcuts)}</kbd>}</div> : <div className="library-page-title"><h1>{libraryTitle}</h1><span>{selectedSite?.name ?? 'JumpServer Desktop'}</span></div>}
               <div className="host-toolbar">
                 <div className="host-toolbar-actions">
-                  <Button variant="tertiary" className="icon-button" isIconOnly aria-label={t(sidebarHidden ? '显示侧栏' : '收起侧栏')} aria-expanded={!sidebarHidden} onPress={() => setSidebarHidden(value => !value)}><LayoutPanelLeft size={17} /></Button>
-                  <Button variant="secondary" className="toolbar-button" type="button" isDisabled={identityBusy || assetLoadState === 'loading'} onPress={() => identity ? void refreshAssetLibrary() : executeCommand(selectedSite ? 'auth.login' : 'site.add')}>{identityBusy || assetLoadState === 'loading' ? <LoaderCircle className="spin" size={15} /> : identity ? <RefreshCw size={15} /> : <LogIn size={15} />}{identity ? t('刷新资产') : selectedSite ? t('登录站点') : t('添加站点')}</Button>
-                  <Button variant="secondary" className="toolbar-button" type="button" onPress={() => setScreen('new')}><TerminalSquare size={16} />{t('新建连接')}</Button>
+                  <Button variant="tertiary" className="icon-button" isIconOnly aria-label={shortcutTitle('sidebar.toggle', t(sidebarHidden ? '显示侧栏' : '收起侧栏'))} aria-expanded={!sidebarHidden} onPress={() => executeCommand('sidebar.toggle')} render={(buttonProps) => <button {...buttonProps} title={shortcutTitle('sidebar.toggle', t(sidebarHidden ? '显示侧栏' : '收起侧栏'))} />}><LayoutPanelLeft size={17} /></Button>
+                  <Button variant="secondary" className="toolbar-button" type="button" isDisabled={identityBusy || assetLoadState === 'loading'} onPress={() => identity ? void refreshAssetLibrary() : executeCommand(selectedSite ? 'auth.login' : 'site.add')} render={(buttonProps) => <button {...buttonProps} title={identity ? t('刷新资产') : shortcutTitle(selectedSite ? 'auth.login' : 'site.add', selectedSite ? t('登录站点') : t('添加站点'))} />}>{identityBusy || assetLoadState === 'loading' ? <LoaderCircle className="spin" size={15} /> : identity ? <RefreshCw size={15} /> : <LogIn size={15} />}{identity ? t('刷新资产') : selectedSite ? t('登录站点') : t('添加站点')}</Button>
+                  <Button variant="secondary" className="toolbar-button" type="button" onPress={() => executeCommand('tabs.new')} render={(buttonProps) => <button {...buttonProps} title={shortcutTitle('tabs.new', t('新建连接'))} />}><TerminalSquare size={16} />{t('新建连接')}</Button>
                 </div>
                 <div className="host-toolbar-options">
                   {sidebarView === 'assets' && <div className="view-switch" role="group" aria-label={t('资产视图')}>
@@ -1450,24 +1605,24 @@ export default function App() {
                         <Popover.Dialog aria-label={t('JumpServer 站点')}>
                           <header><strong>{t('JumpServer 站点')}</strong><small>{t('切换站点以浏览对应的授权资产')}</small></header>
                           <div role="listbox" aria-label={t('已配置站点')}>{sites.map((site, index) => <Button variant="tertiary" className={site.id === selectedSiteId ? 'site-option is-selected' : 'site-option'} type="button" key={site.id}   onPress={() => requestIdentityTransition(site.id)} render={(buttonProps) => <button {...buttonProps} role="option"  aria-selected={site.id === selectedSiteId} />} > <span className={`site-option-avatar tone-${index % 4}`}>{site.name.slice(0, 1).toUpperCase()}</span><span><strong>{site.name}</strong><small>{site.url}</small></span>{site.id === selectedSiteId && <Check size={17} />}</Button>)}</div>
-                          <footer><Button variant="tertiary" type="button" onPress={() => executeCommand('site.add')}><Plus size={17} />{t('添加 JumpServer 站点')}</Button>{selectedSite && <Button variant="tertiary" type="button" onPress={() => { setSiteMenuOpen(false); setSiteForm({ ...selectedSite, error: '' }); setSiteDialogOpen(true); }}><SlidersHorizontal size={17} />{t('编辑当前站点')}</Button>}</footer>
+                          <footer><Button variant="tertiary" type="button" onPress={() => executeCommand('site.add')} render={(buttonProps) => <button {...buttonProps} title={shortcutTitle('site.add', t('添加 JumpServer 站点'))} />}><Plus size={17} />{t('添加 JumpServer 站点')}</Button>{selectedSite && <Button variant="tertiary" type="button" onPress={() => { setSiteMenuOpen(false); setSiteForm({ ...selectedSite, error: '' }); setSiteDialogOpen(true); }}><SlidersHorizontal size={17} />{t('编辑当前站点')}</Button>}</footer>
                         </Popover.Dialog>
                       </Popover.Content>
                     </Popover.Root>
-                    <Button variant="tertiary" className="site-add-button" type="button" isIconOnly  aria-label={t('添加站点')} onPress={() => executeCommand('site.add')} render={(buttonProps) => <button {...buttonProps} title={t('添加站点')} />} > <Plus size={23} /></Button>
+                    <Button variant="tertiary" className="site-add-button" type="button" isIconOnly aria-label={shortcutTitle('site.add', t('添加站点'))} onPress={() => executeCommand('site.add')} render={(buttonProps) => <button {...buttonProps} title={shortcutTitle('site.add', t('添加站点'))} />} > <Plus size={23} /></Button>
                   </div>
                 </div>
               </div>
             </div>}
 
-            <div className="library-content">
-              {sidebarView === 'settings' ? <SettingsPage preferences={preferences} update={appUpdate} updateLoadError={appUpdateLoadError} onSave={saveSettings} onNotify={addToast} siteSection={
+            <div className={`library-content${sidebarView === 'settings' ? ' is-settings' : ''}`}>
+              {sidebarView === 'settings' ? <SettingsPage selectedTab={settingsTab} onTabChange={setSettingsTab} preferences={preferences} update={appUpdate} updateLoadError={appUpdateLoadError} onSave={saveSettings} onNotify={addToast} siteSection={
                 <section className="settings-site">
                   <h2>{t('当前站点')}</h2>
                   <strong>{selectedSite?.name ?? t('未配置站点')}</strong>
                   {selectedSite && <p>{selectedSite.url}</p>}
                   <div>
-                    <Button variant="secondary" className="app-action button-quiet" type="button" onPress={() => executeCommand('site.add')}><Plus size={15} />{t('添加站点')}</Button>
+                    <Button variant="secondary" className="app-action button-quiet" type="button" onPress={() => executeCommand('site.add')} render={(buttonProps) => <button {...buttonProps} title={shortcutTitle('site.add', t('添加站点'))} />}><Plus size={15} />{t('添加站点')}</Button>
                     <Button variant="secondary" className="app-action button-quiet" type="button" isDisabled={!selectedSite} onPress={() => selectedSite && (setSiteForm({ ...selectedSite, error: '' }), setSiteDialogOpen(true))}><SlidersHorizontal size={15} />{t('编辑站点')}</Button>
                     <Button variant="danger" className="app-action button-danger" type="button" isDisabled={!selectedSite} onPress={() => setRemoveSiteId(selectedSite?.id ?? null)}>{t('删除站点')}</Button>
                   </div>
@@ -1479,7 +1634,7 @@ export default function App() {
                   <p>{selectedSite ? t('优先恢复已保存授权；需要认证时打开系统浏览器，复用站点的 SSO 与 MFA。') : t('添加 JumpServer 站点，将资产、终端和文件放在同一个工作区。')}</p>
                   {selectedSite && <span className="welcome-address">{selectedSite.url}</span>}
                   {authNotice && <p role="status">{authNotice}</p>}
-                  <Button variant="primary" className="app-action button-primary" type="button" isDisabled={identityBusy} onPress={() => executeCommand(selectedSite ? 'auth.login' : 'site.add')}>{identityBusy ? <LoaderCircle className="spin" size={16} /> : selectedSite ? <LogIn size={16} /> : <Plus size={16} />}{identityBusy ? t('正在恢复或等待浏览器授权…') : selectedSite ? t('登录站点') : t('添加站点')}</Button>
+                  <Button variant="primary" className="app-action button-primary" type="button" isDisabled={identityBusy} onPress={() => executeCommand(selectedSite ? 'auth.login' : 'site.add')} render={(buttonProps) => <button {...buttonProps} title={shortcutTitle(selectedSite ? 'auth.login' : 'site.add', selectedSite ? t('登录站点') : t('添加站点'))} />}>{identityBusy ? <LoaderCircle className="spin" size={16} /> : selectedSite ? <LogIn size={16} /> : <Plus size={16} />}{identityBusy ? t('正在恢复或等待浏览器授权…') : selectedSite ? t('登录站点') : t('添加站点')}</Button>
                   {identityBusy && <Button variant="secondary" className="app-action button-quiet" type="button" onPress={() => void window.desktop.invoke('auth.cancel', {}).catch((error) => addToast(getErrorMessage(error), 'error'))}>{t('取消登录')}</Button>}
                   <small><ShieldCheck size={13} />{t('OAuth 凭据由系统密钥库加密；不保存目标主机密码')}</small>
                 </section> : <>
@@ -1551,7 +1706,7 @@ export default function App() {
               const session = sessionById.get(tab.sessionId);
               if (!session) return null;
               const visiblePane = tab.id === activeTabId ? 'primary' : tab.id === secondaryTabId ? 'secondary' : null;
-              return <article className={`workspace-slot ${visiblePane ? `is-${visiblePane}` : 'is-hidden'} ${paneFocus === visiblePane ? 'is-focused' : ''}`} key={tab.id} aria-hidden={!visiblePane} inert={!visiblePane} onMouseDown={() => visiblePane && setPaneFocus(visiblePane)}>
+              return <article className={`workspace-slot ${visiblePane ? `is-${visiblePane}` : 'is-hidden'} ${paneFocus === visiblePane ? 'is-focused' : ''}`} key={tab.id} aria-hidden={!visiblePane} inert={!visiblePane} onMouseDown={() => visiblePane && setPaneFocus(visiblePane)} onFocusCapture={() => visiblePane && setPaneFocus(visiblePane)}>
                 <div className="split-caption"><SessionIcon kind={session.kind} size={13} /><strong>{session.context.assetName}</strong><span>{session.context.accountName}</span><i className={`connection-indicator is-${session.phase}`} /></div>
                 <div className="pane-content">{session.kind === 'terminal' ? <TerminalWorkspace session={session} identity={identity} preferences={preferences}
                   onReconnect={() => void openRecent(session.context)} reconnecting={openingSessionKinds.includes(session.kind)}
@@ -1567,7 +1722,7 @@ export default function App() {
         {screen === 'new' && <section className="new-tab-surface" aria-label={t('新标签页')}><NewTabPage recent={scopedRecent} siteName={selectedSite?.name ?? ''} onConnect={(context) => void openRecent(context)} onSearch={openPicker} onBrowseHosts={browseHosts} /></section>}
       </div>
 
-      {pickerOpen && <QuickSwitcher entries={quickEntries} index={pickerIndex} query={pickerQuery} loading={pickerAssetState === 'loading'} inputRef={pickerInputRef} onQueryChange={(value) => { setPickerQuery(value); setPickerIndex(0); }} onIndexChange={setPickerIndex} onActivate={(key) => { const entry = pickerEntries.find((entry) => entry.key === key); if (entry) activatePickerEntry(entry); }} onClose={() => { setPickerOpen(false); setPickerQuery(''); }} onCompositionChange={(value) => { composingRef.current = value; }} />}
+      {pickerOpen && <QuickSwitcher entries={quickEntries} index={pickerIndex} query={pickerQuery} loading={pickerAssetState === 'loading'} inputRef={pickerInputRef} onQueryChange={(value) => { setPickerQuery(value); setPickerIndex(0); }} onIndexChange={setPickerIndex} onActivate={(key) => { const entry = pickerEntries.find((entry) => entry.key === key); if (entry) activatePickerEntry(entry); }} onClose={closePicker} onCompositionChange={(value) => { composingRef.current = value; }} />}
       {siteDialogOpen && <SiteDialog form={siteForm} onChange={setSiteForm} onClose={() => setSiteDialogOpen(false)} onSubmit={saveSite} />}
       {pendingFileSession && <AlertDialog.Root isOpen onOpenChange={(isOpen) => { if (!isOpen && !replacingFile) setPendingFileSession(null); }}>
         <AlertDialog.Backdrop className="modal-backdrop" isDismissable={false} isKeyboardDismissDisabled>

@@ -1,6 +1,10 @@
 .settings-page.preferences-screen {
   display: grid;
+  flex: 1;
   width: min(1120px, 100%);
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 16px;
   margin: 0 auto;
   color: var(--text);
@@ -66,12 +70,25 @@
 
 .settings-page .settings-validation {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
-  gap: 6px;
+  gap: 6px 8px;
   margin: 8px 0 0;
   color: var(--danger);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.settings-page .settings-validation > span {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.settings-page .settings-validation-action {
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: 3px 6px;
+  color: currentColor;
 }
 
 .settings-page .settings-validation svg {
@@ -81,12 +98,63 @@
 
 .settings-page .preferences-form {
   display: grid;
-  gap: 16px;
   min-width: 0;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
 }
 
 .settings-page .settings-controls {
-  display: contents;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.settings-page .settings-tabs {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.settings-page .settings-tabs-list-container {
+  min-width: 0;
+  padding: 0 2px;
+  border-bottom: 1px solid var(--border);
+  background: var(--canvas);
+}
+
+.settings-page .settings-tabs-list {
+  min-width: 100%;
+  padding: 0 2px;
+}
+
+.settings-page .settings-tabs [data-slot="tabs-tab"] {
+  flex: 0 0 auto;
+  width: auto;
+  white-space: nowrap;
+  min-height: 36px;
+  padding: 0 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.settings-page .settings-tabs [data-slot="tabs-tab"][aria-selected="true"] {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.settings-page .settings-tabs-panel {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 16px 2px 2px;
 }
 
 .settings-page .settings-section,

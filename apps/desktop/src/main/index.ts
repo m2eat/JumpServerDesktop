@@ -26,6 +26,8 @@ const commands: Readonly<Record<CommandName, true>> = {
   'app.downloadUpdate': true,
   'app.installUpdate': true,
   'app.openRelease': true,
+  'app.edit': true,
+  'app.quit': true,
   'site.save': true,
   'site.remove': true,
   'auth.login': true,
@@ -129,6 +131,7 @@ async function createWindow(): Promise<void> {
     installFailed: recoverFromInstallFailure
   });
   let exitApproved = false;
+  let quitRequested = false;
   let closePromptPending = false;
   let exitCleanupPending = false;
   const update = (session: SessionInfo): void => emit({ type: 'session', session });
@@ -152,6 +155,19 @@ async function createWindow(): Promise<void> {
   ipcMain.handle('desktop:invoke', async (event, command: unknown, raw: unknown) => {
     if (!trusted(event) || typeof command !== 'string' || !Object.hasOwn(commands, command)) throw new Error('请求来源或命令不受信任');
     if (exitCleanupPending) throw new Error('工作台正在为更新关闭，不能执行新的操作');
+    if (command === 'app.edit') {
+      const { action } = z.object({ action: z.enum(['copy', 'cut', 'paste', 'selectAll', 'undo', 'redo']) }).strict().parse(raw);
+      window.webContents[action]();
+      return;
+    }
+    if (command === 'app.quit') {
+      emptyArgs.parse(raw);
+      if (!closePromptPending) {
+        quitRequested = true;
+        window.close();
+      }
+      return;
+    }
     if (command === 'app.updates') {
       emptyArgs.parse(raw);
       return appUpdates.snapshot();
@@ -292,6 +308,8 @@ async function createWindow(): Promise<void> {
     }
     return result;
   });
+  // Renderer capture dispatch owns configurable keys; native menu clicks still work normally.
+  window.webContents.setIgnoreMenuShortcuts(true);
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.webContents.on('will-attach-webview', event => event.preventDefault());
@@ -318,11 +336,15 @@ async function createWindow(): Promise<void> {
         exitCleanupPending = true;
         await auth.dispose();
         exitApproved = true;
-        window.close();
+        if (quitRequested) app.quit();
+        else window.close();
       } catch {
         emit({ type: 'notice', message: nativeText('退出清理未完成，窗口已保留，请检查连接状态后重试。') });
       } finally {
-        if (!exitApproved) exitCleanupPending = false;
+        if (!exitApproved) {
+          exitCleanupPending = false;
+          quitRequested = false;
+        }
         closePromptPending = false;
       }
     })();

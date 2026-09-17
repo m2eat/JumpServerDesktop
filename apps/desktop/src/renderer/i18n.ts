@@ -8,12 +8,13 @@ import { databaseMessages } from './locales/database';
 import { filesMessages } from './locales/files';
 import { workspaceMessages } from './locales/workspace';
 import { groupMessages } from './locales/groups';
+import { shortcutsMessages } from './locales/shortcuts';
 
 type Locale = 'zh-CN' | 'en-US';
 type Values = Record<string, string | number>;
 const messages: Record<string, string> = {
   ...appMessages, ...settingsMessages, ...terminalMessages,
-  ...databaseMessages, ...filesMessages, ...workspaceMessages, ...groupMessages
+  ...databaseMessages, ...filesMessages, ...workspaceMessages, ...groupMessages, ...shortcutsMessages
 };
 
 function systemLocale(): Locale {

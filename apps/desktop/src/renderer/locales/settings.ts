@@ -1,4 +1,12 @@
 export const settingsMessages: Record<string, string> = {
+  '外观': 'Appearance',
+  '数据库': 'Database',
+  '编辑器': 'Editor',
+  '快捷键': 'Shortcuts',
+  '站点': 'Sites',
+  '设置类别': 'Settings categories',
+  '转到 {{category}}': 'Go to {{category}}',
+  '恢复全部默认设置': 'Restore all defaults',
   '关于与更新': 'About and updates',
   '当前版本 {{version}} · 稳定更新通道': 'Version {{version}} · Stable update channel',
   'JumpServer Desktop 社区客户端': 'JumpServer Desktop community client',
@@ -102,7 +110,6 @@ export const settingsMessages: Record<string, string> = {
   '{{count}} 个空格': '{{count}} spaces',
   '文件自动换行': 'Wrap file text',
   '设置包含无效值。': 'Settings contain an invalid value.',
-  '恢复默认值': 'Restore defaults',
   '正在保存设置…': 'Saving settings…',
   '保存并应用': 'Save and apply'
 };

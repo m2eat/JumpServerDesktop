@@ -113,6 +113,35 @@ xattr -dr com.apple.quarantine "/Applications/JumpServer Desktop.app"
 - 关闭 Sheet 或按 Escape 不会丢失修改和提交报告；提交过程中禁止重复提交。报告可通过底栏重新打开。
 - 提交成功但刷新失败时，**重试刷新** 只重新读取，不重复写入。失败后的编辑保护只有在明确放弃修改并成功重新读取后才解除；提交结果未知时仍需重新连接并核验数据库，不能直接重试。
 
+## 键盘快捷键
+
+设置按「外观、终端、数据库、编辑器、快捷键、关于与更新、站点」分类显示。标签栏和保存按钮保持可见，只有当前类别内容滚动；切换标签保留所有未保存修改，**保存并应用**统一保存各类别草稿。快捷键入口和更新入口直接打开对应标签。
+
+打开 **设置 → 快捷键**，可搜索全部 46 项应用动作，录制新组合键、解绑、恢复单项或整个平台的默认值。每个按键显示为独立键帽：macOS 使用 ⌘、⌥、⇧、⌃ 等符号，Windows 使用 Ctrl、Alt、Shift 等文字。macOS、Windows、Linux 的覆盖配置独立保存为设备设置，不随登录身份变化；旧版本设置会自动补齐默认键位。
+
+| 常用动作 | macOS | Windows |
+| --- | --- | --- |
+| 全局搜索／命令 | `⌘K` | `Ctrl+Shift+K` |
+| 新建／关闭当前连接标签 | `⌘T` / `⌘W` | `Ctrl+Shift+T` / `Ctrl+Shift+W` |
+| 下一个／上一个标签 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | 同左 |
+| 第 1–8 个／最后一个连接标签 | `⌘1…8` / `⌘9` | `Alt+1…8` / `Alt+9` |
+| 设置／快捷键设置 | `⌘,` / `⇧⌘,` | `Ctrl+,` / `Ctrl+Shift+,` |
+| 终端搜索 | `⌘F` | `Ctrl+Shift+F` |
+| 终端复制／粘贴 | `⌘C` / `⌘V` | `Ctrl+Shift+C` / `Ctrl+Shift+V` |
+| 保存远程文件 | `⌘S` | `Ctrl+S` |
+| 执行选中 SQL（未选中时执行全文） | `⌘Enter` | `Ctrl+Enter` |
+| 刷新远端目录／当前表格 | `F5` | `F5` |
+
+- 快捷键只在应用获得焦点时工作，不注册系统全局热键。终端、文件、SQL 编辑器和表格按焦点分发；后台窗格不执行动作。弹窗、输入法组合和快捷键录制期间暂停应用动作。
+- Windows 终端默认保留 Shell 的 `Ctrl+C`、`Ctrl+V`、`Ctrl+W` 等控制键。可主动改绑，但不建议占用正在使用的 Shell 或编辑器按键。
+- 同一作用域、全局与局部、编辑器与文件／数据库的重复绑定会阻止保存；互不相交的作用域允许复用。系统保留组合和无修饰键的普通输入不可绑定；功能键可单独使用。
+- 绑定记录物理按键位置，而非输入法产生的字符。原生文本编辑、Tab／方向键导航、Enter／Escape 确认取消仍沿用控件行为；此设置管理应用动作，不替换 Monaco 的完整编辑键位系统。
+- 文件保存、关闭连接、数据库变更预览与退出继续经过原有权限和确认流程；快捷键不会直接提交表格写入。
+
+**English:** All 46 application commands can be rebound, cleared or reset under **Settings → Shortcuts**. Overrides are stored separately for macOS, Windows and Linux and take effect after **Save and apply**. Windows terminal defaults use Ctrl+Shift to preserve shell control keys; macOS uses Command. Dispatch follows the focused surface, pauses for modals/IME/recording, and retains existing authorization and confirmation steps. Overlapping bindings and reserved OS combinations block saving. Bindings use physical key positions; native text/navigation controls and Monaco’s full editing keymap remain native.
+
+Settings are grouped into seven tabs with a fixed header and tab bar; only the active panel scrolls. Switching tabs preserves drafts, and **Save and apply** saves all categories together. Shortcuts use individual platform-specific keycaps, and shortcut/update entry points open their corresponding tab directly.
+
 ## 应用更新
 
 打开 **设置 → 关于与更新**：

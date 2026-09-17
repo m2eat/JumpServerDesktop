@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import type { Identity, Preferences, PreferenceSettings, Site } from '../../../desktop-contract/src/index';
 import { defaultPreferenceSettings, preferenceSettingsSchema } from '../../../desktop-contract/src/preferences';
+import { defaultShortcutPreferences } from '../../../desktop-contract/src/shortcuts';
 import { parsePreferences, parseStoredPreferences, parseStoredPreferenceScope, siteSaveArgsSchema } from './schemas';
 
 const siteRowSchema = z
@@ -21,10 +22,11 @@ const preferenceRowSchema = z
   })
   .strict();
 
-// Existing device settings predate update preferences; only these new fields may be absent.
+// Only settings added after device-wide preferences existed may be absent in older profiles.
 const storedDeviceSettingsSchema = preferenceSettingsSchema.extend({
   autoCheckUpdates: preferenceSettingsSchema.shape.autoCheckUpdates.default(true),
-  autoDownloadUpdates: preferenceSettingsSchema.shape.autoDownloadUpdates.default(false)
+  autoDownloadUpdates: preferenceSettingsSchema.shape.autoDownloadUpdates.default(false),
+  shortcuts: preferenceSettingsSchema.shape.shortcuts.default(defaultShortcutPreferences)
 });
 
 function normalizeSiteUrl(value: string): string {

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { PreferenceSettings, Preferences } from './index';
+import { defaultShortcutPreferences, shortcutPreferencesSchema } from './shortcuts';
 
 const fontFamilySchema = z.string().trim().min(1).max(160);
 
@@ -33,7 +34,8 @@ export const preferenceSettingsSchema = z.object({
   ]),
   language: z.enum(['system', 'zh-CN', 'en-US']),
   autoCheckUpdates: z.boolean(),
-  autoDownloadUpdates: z.boolean()
+  autoDownloadUpdates: z.boolean(),
+  shortcuts: shortcutPreferencesSchema
 }).strict() satisfies z.ZodType<PreferenceSettings>;
 
 export function defaultPreferenceSettings(): PreferenceSettings {
@@ -58,7 +60,8 @@ export function defaultPreferenceSettings(): PreferenceSettings {
     theme: 'jumpserver',
     language: 'system',
     autoCheckUpdates: true,
-    autoDownloadUpdates: false
+    autoDownloadUpdates: false,
+    shortcuts: defaultShortcutPreferences()
   };
 }
 

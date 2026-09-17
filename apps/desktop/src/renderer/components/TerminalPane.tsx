@@ -6,6 +6,7 @@ import { SearchAddon } from '@xterm/addon-search';
 import { ArrowDown, ArrowUp, FolderOpen, RefreshCw, Search, ShieldAlert, Square, X } from 'lucide-react';
 import type { Preferences, SessionInfo } from '@shared/index';
 import { useI18n } from '../i18n';
+import { useShortcutScope, shortcutLabel } from '../shortcuts';
 import { attachTerminal } from '../terminal/streams';
 import { useTheme } from '../themes';
 import '@xterm/xterm/css/xterm.css';
@@ -33,6 +34,7 @@ export default function TerminalPane({ session, preferences, onToggleSftp, sftpO
   const { t, locale } = useI18n();
   const theme = useTheme(preferences.theme);
   const container = useRef<HTMLDivElement>(null);
+  const pane = useRef<HTMLElement>(null);
   const terminal = useRef<Terminal | null>(null);
   const search = useRef<SearchAddon | null>(null);
   const copyOnSelect = useRef(preferences.terminalCopyOnSelect);
@@ -131,15 +133,6 @@ export default function TerminalPane({ session, preferences, onToggleSftp, sftpO
         if (!disposed) setError(operationError('无法复制选中的终端文本：{{message}}', reason));
       });
     });
-    instance.attachCustomKeyEventHandler(event => {
-      if (event.type !== 'keydown') return true;
-      if ((event.metaKey && event.key.toLowerCase() === 'f') || (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'f')) {
-        setSearching(true);
-        return false;
-      }
-      if ((event.metaKey && event.key.toLowerCase() === 'k') || (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'k')) return false;
-      return true;
-    });
     const onPaste = (event: ClipboardEvent) => {
       const text = event.clipboardData?.getData('text/plain');
       if (text && /[\r\n]/.test(text)) {
@@ -190,9 +183,45 @@ export default function TerminalPane({ session, preferences, onToggleSftp, sftpO
     return () => { cancelled = true; };
   }, [preferences.fontSize, preferences.terminalFont, preferences.terminalLineHeight]);
 
-  const find = (backwards = false) => {
-    if (!search.current || !term) return;
+  const openSearch = (): boolean => {
+    if (terminal.current) {
+      setSearching(true);
+      window.requestAnimationFrame(() => pane.current?.querySelector<HTMLInputElement>('.terminal-search input')?.focus());
+    }
+    return true;
+  };
+  const find = (backwards = false): boolean => {
+    if (!search.current) return true;
+    if (!term) {
+      setSearching(true);
+      return true;
+    }
     setMatch(backwards ? search.current.findPrevious(term) : search.current.findNext(term));
+    return true;
+  };
+  const copySelection = (): boolean => {
+    const selectedText = terminal.current?.getSelection();
+    if (!selectedText) return true;
+    if (!navigator.clipboard?.writeText) {
+      setError({ key: '系统剪贴板不可用。' });
+      return true;
+    }
+    void navigator.clipboard.writeText(selectedText).catch(reason => setError(operationError('无法复制选中的终端文本：{{message}}', reason)));
+    return true;
+  };
+  const requestPaste = (): boolean => {
+    if (phase.current === 'active') {
+      void window.desktop.invoke('app.edit', { action: 'paste' }).catch(reason => setError(operationError('无法粘贴到终端：{{message}}', reason)));
+    }
+    return true;
+  };
+  const selectAll = (): boolean => {
+    terminal.current?.selectAll();
+    return true;
+  };
+  const clearTerminal = (): boolean => {
+    terminal.current?.clear();
+    return true;
   };
   const sendInterrupt = () => {
     if (phase.current !== 'active') return;
@@ -215,17 +244,41 @@ export default function TerminalPane({ session, preferences, onToggleSftp, sftpO
       ? t('终端连接已断开：{{message}}', { message: session.error })
       : t('连接已断开。重新连接不会重放输入。');
 
-  return <section className="terminal-pane" aria-label={t('{{name}} 终端', { name: session.context.assetName })}>
+  useShortcutScope(container, {
+    'terminal.copy': copySelection,
+    'terminal.paste': requestPaste,
+    'terminal.select-all': selectAll,
+    'terminal.clear': clearTerminal,
+    'terminal.interrupt': () => {
+      if (phase.current === 'active') sendInterrupt();
+      return true;
+    },
+  });
+  useShortcutScope(pane, {
+    'terminal.search': openSearch,
+    'terminal.find-next': () => find(),
+    'terminal.find-previous': () => find(true),
+    'terminal.reconnect': () => {
+      if (reconnectable && !reconnecting) onReconnect();
+      return true;
+    },
+    'terminal.sftp': () => {
+      onToggleSftp?.();
+      return true;
+    },
+  });
+
+  return <section ref={pane} className="terminal-pane" aria-label={t('{{name}} 终端', { name: session.context.assetName })}>
     <div className="terminal-toolbar" role="toolbar" aria-label={t('终端操作')}>
-      {onToggleSftp && <Button className="terminal-sftp-button" type="button" variant="ghost" aria-label={t('切换快速 SFTP')} aria-expanded={sftpOpen}  onPress={onToggleSftp} render={(buttonProps) => <button {...buttonProps} title={t('快速上传和下载文件')} />} > <FolderOpen size={15} /><span>SFTP</span></Button>}
-      <Button isIconOnly type="button" variant="ghost" aria-label={t('搜索终端输出')}  onPress={() => setSearching(true)} render={(buttonProps) => <button {...buttonProps} title={t('搜索当前缓冲')} />} > <Search size={15} /></Button>
-      <Button isIconOnly type="button" variant="ghost" aria-label={t('向终端发送中断')}  isDisabled={session.phase !== 'active'} onPress={sendInterrupt} render={(buttonProps) => <button {...buttonProps} title={t('发送中断')} />} > <Square size={13} /></Button>
+      {onToggleSftp && <Button className="terminal-sftp-button" type="button" variant="ghost" aria-label={t('切换快速 SFTP')} aria-expanded={sftpOpen}  onPress={onToggleSftp} render={(buttonProps) => <button {...buttonProps} title={`${t('快速上传和下载文件')} (${shortcutLabel('terminal.sftp', preferences.shortcuts)})`} />} > <FolderOpen size={15} /><span>SFTP</span></Button>}
+      <Button isIconOnly type="button" variant="ghost" aria-label={t('搜索终端输出')}  onPress={openSearch} render={(buttonProps) => <button {...buttonProps} title={`${t('搜索当前缓冲')} (${shortcutLabel('terminal.search', preferences.shortcuts)})`} />} > <Search size={15} /></Button>
+      <Button isIconOnly type="button" variant="ghost" aria-label={t('向终端发送中断')}  isDisabled={session.phase !== 'active'} onPress={sendInterrupt} render={(buttonProps) => <button {...buttonProps} title={`${t('发送中断')} (${shortcutLabel('terminal.interrupt', preferences.shortcuts)})`} />} > <Square size={13} /></Button>
     </div>
     {searching && <form className="terminal-search input-frame" onSubmit={event => { event.preventDefault(); find(); }}>
       <Search size={14} />
       <Input autoFocus aria-label={t('搜索当前终端')} value={term} onChange={event => { setTerm(event.target.value); setMatch(true); }} onKeyDown={event => { if (event.key === 'Escape') { setSearching(false); terminal.current?.focus(); } if (event.nativeEvent.isComposing && event.key === 'Enter') event.preventDefault(); }} placeholder={t('搜索当前缓冲…')} />
-      <Button isIconOnly type="button" variant="ghost" aria-label={t('上一个匹配')} onPress={() => find(true)}><ArrowUp size={14} /></Button>
-      <Button isIconOnly type="submit" variant="ghost" aria-label={t('下一个匹配')}><ArrowDown size={14} /></Button>
+      <Button isIconOnly type="button" variant="ghost" aria-label={t('上一个匹配')} onPress={() => find(true)} render={(buttonProps) => <button {...buttonProps} title={`${t('上一个匹配')} (${shortcutLabel('terminal.find-previous', preferences.shortcuts)})`} />}><ArrowUp size={14} /></Button>
+      <Button isIconOnly type="submit" variant="ghost" aria-label={t('下一个匹配')} render={(buttonProps) => <button {...buttonProps} title={`${t('下一个匹配')} (${shortcutLabel('terminal.find-next', preferences.shortcuts)})`} />}><ArrowDown size={14} /></Button>
       <Button isIconOnly type="button" variant="ghost" aria-label={t('关闭搜索')} onPress={() => { setSearching(false); terminal.current?.focus(); }}><X size={14} /></Button>
       {!match && <small>{t('没有匹配')}</small>}
     </form>}
@@ -236,7 +289,7 @@ export default function TerminalPane({ session, preferences, onToggleSftp, sftpO
         <span>{disconnectedMessage}</span>
         {reconnectable && <small>{t('旧终端输出保留在此标签。重新连接将在新标签页建立授权会话，不会恢复原 shell 或重放输入。')}</small>}
       </div>
-      {reconnectable && <Button type="button" variant="secondary" isDisabled={reconnecting} onPress={onReconnect}>
+      {reconnectable && <Button type="button" variant="secondary" isDisabled={reconnecting} onPress={onReconnect} render={(buttonProps) => <button {...buttonProps} title={`${t('重新连接')} (${shortcutLabel('terminal.reconnect', preferences.shortcuts)})`} />}>
         <RefreshCw size={14} />{reconnecting ? t('正在建立新会话…') : t('重新连接')}
       </Button>}
     </div>}

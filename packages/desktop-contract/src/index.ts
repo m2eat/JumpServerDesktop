@@ -1,3 +1,5 @@
+import type { ShortcutPreferences } from './shortcuts';
+
 export type SessionKind = 'terminal' | 'files' | 'database';
 export type Phase = 'connecting' | 'active' | 'closed' | 'lost' | 'failed';
 export interface Site { id: string; name: string; url: string }
@@ -130,6 +132,7 @@ export interface Preferences {
   language: LanguageSetting;
   autoCheckUpdates: boolean;
   autoDownloadUpdates: boolean;
+  shortcuts: ShortcutPreferences;
   favorites: string[];
   recent: ResourceContext[];
 }
@@ -153,6 +156,8 @@ export interface Commands {
   'app.downloadUpdate': { args: Record<string, never>; result: AppUpdateState };
   'app.installUpdate': { args: Record<string, never>; result: void };
   'app.openRelease': { args: Record<string, never>; result: void };
+  'app.edit': { args: { action: 'copy' | 'cut' | 'paste' | 'selectAll' | 'undo' | 'redo' }; result: void };
+  'app.quit': { args: Record<string, never>; result: void };
 
   'app.bootstrap': { args: Record<string, never>; result: Snapshot };
   'site.save': { args: { id?: string; name: string; url: string }; result: Site };

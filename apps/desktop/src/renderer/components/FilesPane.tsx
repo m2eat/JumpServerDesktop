@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Input, Modal } from '@heroui/react';
 import { ArrowUp, ChevronLeft, ChevronRight, Copy, Download, File, Folder, Link, RefreshCw, Upload } from 'lucide-react';
 import Editor, { DiffEditor } from '@monaco-editor/react';
+import type { DiffOnMount, OnMount } from '@monaco-editor/react';
+import type { editor as MonacoEditor } from 'monaco-editor';
 import { z } from 'zod';
 import type {
   Capability,
@@ -13,6 +15,8 @@ import type {
   TransferTask,
 } from '@shared/index';
 import { formatNumber, t as translate, translateDiagnostic, useI18n } from '../i18n';
+import { triggerMonacoShortcut } from '../monaco-shortcuts';
+import { useShortcutScope, shortcutLabel } from '../shortcuts';
 import { useTheme } from '../themes';
 import './FilesPane.css';
 
@@ -277,6 +281,9 @@ export default function FilesPane({
   const [mutationBusy, setMutationBusy] = useState(false);
   const [mutationOutcomeUnknown, setMutationOutcomeUnknown] = useState(false);
   const mutationBusyRef = useRef(mutationBusy);
+  const fileScope = useRef<HTMLDivElement | null>(null);
+  const editorScope = useRef<HTMLDivElement | null>(null);
+  const fileEditor = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
 
   const listRequestRef = useRef(0);
   const textReadRequestRef = useRef(0);
@@ -1205,6 +1212,45 @@ export default function FilesPane({
     && activeEditor.phase !== 'conflict'
     && activeEditor.phase !== 'unknown'
     && saveCapability.state === 'supported';
+  const canModifyActiveEditor = activeEditor !== null
+    && !showDiff
+    && (activeEditor.phase === 'saving' || (activeEditor.writable && saveCapability.state === 'supported'));
+
+  useShortcutScope(fileScope, {
+    'file.refresh': () => {
+      if (sessionReady && !loading) void loadDirectory(activePathRef.current, 'keep');
+      return true;
+    },
+  });
+  useShortcutScope(editorScope, {
+    'file.save': () => {
+      if (canSaveActiveEditor && activeEditor !== null) {
+        openDialog({ kind: 'save-editor', editorId: activeEditor.id });
+      }
+      return true;
+    },
+    'editor.find': () => {
+      triggerMonacoShortcut(fileEditor.current, 'editor.find');
+      return true;
+    },
+    'editor.replace': () => {
+      if (canModifyActiveEditor) triggerMonacoShortcut(fileEditor.current, 'editor.replace');
+      return true;
+    },
+    'editor.format': () => {
+      if (canModifyActiveEditor) triggerMonacoShortcut(fileEditor.current, 'editor.format');
+      return true;
+    },
+    'editor.comment': () => {
+      if (canModifyActiveEditor) triggerMonacoShortcut(fileEditor.current, 'editor.comment');
+      return true;
+    },
+    'editor.command-palette': () => {
+      triggerMonacoShortcut(fileEditor.current, 'editor.command-palette');
+      return true;
+    },
+  });
+
 
   const dialogPrimaryLabel = mutationOutcomeUnknown
     ? t('请先关闭并刷新核验')
@@ -1248,6 +1294,7 @@ export default function FilesPane({
     )}
     
     <div
+      ref={fileScope}
       className="files-pane__remote-panel"
       onDragOver={(event) => {
         const acceptsLocal = event.dataTransfer.types.includes('application/x-jms-local');
@@ -1318,7 +1365,7 @@ export default function FilesPane({
         <Button type="button" variant="ghost" aria-label={t('上级目录')} onPress={() => navigateTo(parentPath(listing?.path ?? pathInput))} isDisabled={!sessionReady || loading || (listing?.path ?? '/') === '/'}><ArrowUp size={16} /></Button>
         <Input variant="secondary" aria-label={t('远端路径')} value={pathInput} onChange={(event) => setPathInput(event.target.value)} disabled={!sessionReady || loading} spellCheck={false} />
         <Button className="files-pane__path-go" type="submit" variant="secondary" isDisabled={!sessionReady || loading}>{t('前往')}</Button>
-        <Button type="button" variant="ghost" aria-label={t('刷新远端目录')} onPress={() => void loadDirectory(activePathRef.current, 'keep')} isDisabled={!sessionReady || loading}><RefreshCw size={15} /></Button>
+        <Button type="button" variant="ghost" aria-label={t('刷新远端目录')} onPress={() => void loadDirectory(activePathRef.current, 'keep')} isDisabled={!sessionReady || loading} render={(buttonProps) => <button {...buttonProps} title={`${t('刷新远端目录')} (${shortcutLabel('file.refresh', preferences.shortcuts)})`} />}><RefreshCw size={15} /></Button>
       </form>
       <div className="files-pane__remote-actions" role="toolbar" aria-label={t('远端文件操作')}>
         <Button className="files-pane__toolbar-button" type="button" variant="secondary" onPress={() => void startUpload()} isDisabled={!sessionReady || listing === null}><Upload size={15} />{t('上传…')}</Button>
@@ -1432,7 +1479,7 @@ export default function FilesPane({
         {activeEditor !== null && (
           <div className="files-pane__editor-actions">
             <Button type="button" variant="secondary" onPress={() => setShowDiff((current) => !current)}>{showDiff ? t('返回编辑') : t('比较基线')}</Button>
-            <Button type="button" variant="secondary" onPress={() => openDialog({ kind: 'save-editor', editorId: activeEditor.id })} isDisabled={!canSaveActiveEditor}>{t('保存到远端')}</Button>
+            <Button type="button" variant="secondary" onPress={() => openDialog({ kind: 'save-editor', editorId: activeEditor.id })} isDisabled={!canSaveActiveEditor} render={(buttonProps) => <button {...buttonProps} title={`${t('保存到远端')} (${shortcutLabel('file.save', preferences.shortcuts)})`} />}>{t('保存到远端')}</Button>
           </div>
         )}
       </div>
@@ -1497,7 +1544,7 @@ export default function FilesPane({
               <span>{t('保存失败；可以继续编辑后重新确认保存。本地草稿未丢失。')}</span>
             </div>
           )}
-          <div className="files-pane__monaco-shell">
+          <div ref={editorScope} className="files-pane__monaco-shell">
             {showDiff ? (
               <DiffEditor
                 height="360px"
@@ -1505,6 +1552,7 @@ export default function FilesPane({
                 original={activeEditor.remoteRevision?.content ?? activeEditor.baseline}
                 modified={activeEditor.content}
                 theme={theme.id}
+                onMount={((instance) => { fileEditor.current = instance.getModifiedEditor(); }) satisfies DiffOnMount}
                 options={{ ...editorOptions, readOnly: true, originalEditable: false }}
               />
             ) : (
@@ -1514,6 +1562,7 @@ export default function FilesPane({
                 value={activeEditor.content}
                 theme={theme.id}
                 onChange={onEditorChange}
+                onMount={((instance) => { fileEditor.current = instance; }) satisfies OnMount}
                 options={{ ...editorOptions, readOnly: activeEditor.phase === 'saving' ? false : !activeEditor.writable || saveCapability.state !== 'supported' }}
               />
             )}

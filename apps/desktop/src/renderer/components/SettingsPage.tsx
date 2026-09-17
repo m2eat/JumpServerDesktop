@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent, ReactNode } from 'react';
-import { Button, ComboBox, Input, Label, ListBox, Select, Switch } from '@heroui/react';
+import { Button, ComboBox, Input, Label, ListBox, Select, Switch, Tabs } from '@heroui/react';
 import { Check, CircleAlert, LoaderCircle, RefreshCw, RotateCcw, Save } from 'lucide-react';
 import type { AppUpdateState, PreferenceSettings, Preferences } from '@shared/index';
 import { defaultPreferenceSettings, preferenceSettingsSchema } from '@shared/preferences';
+import { shortcutConflicts, type ShortcutPlatform, type ShortcutPreferences } from '@shared/shortcuts';
 import { useI18n } from '../i18n';
 import { themes } from '../themes';
 import AppUpdateSection from './AppUpdateSection';
+import ShortcutSettingsSection from './ShortcutSettingsSection';
 import './SettingsPage.css';
+
+export type SettingsTab = 'appearance' | 'terminal' | 'database' | 'editor' | 'shortcuts' | 'updates' | 'sites';
 
 interface SettingsPageProps {
   preferences: Preferences;
@@ -16,6 +20,8 @@ interface SettingsPageProps {
   onSave: (settings: PreferenceSettings) => Promise<boolean>;
   onNotify: (message: string, tone: 'success' | 'error') => void;
   siteSection?: ReactNode;
+  selectedTab: SettingsTab;
+  onTabChange: (tab: SettingsTab) => void;
 }
 
 type FontLoadState =
@@ -37,7 +43,21 @@ type Translate = (key: string, values?: Record<string, string | number>) => stri
 const terminalCursorStyles = ['block', 'underline', 'bar'] as const;
 const editorTabSizes = [2, 4, 8] as const;
 const databasePageSizes = [50, 100, 200, 500] as const;
+const shortcutPlatforms: readonly ShortcutPlatform[] = ['darwin', 'win32', 'linux'];
 
+const settingsTabs: readonly { id: SettingsTab; label: string }[] = [
+  { id: 'appearance', label: '外观' },
+  { id: 'terminal', label: '终端' },
+  { id: 'database', label: '数据库' },
+  { id: 'editor', label: '编辑器' },
+  { id: 'shortcuts', label: '快捷键' },
+  { id: 'updates', label: '关于与更新' },
+  { id: 'sites', label: '站点' }
+];
+
+function isSettingsTab(value: string): value is SettingsTab {
+  return settingsTabs.some((tab) => tab.id === value);
+}
 function settingsFromPreferences(preferences: Preferences): PreferenceSettings {
   const { favorites: _favorites, recent: _recent, ...settings } = preferences;
   return settings;
@@ -74,7 +94,28 @@ function settingsEqual(left: PreferenceSettings, right: PreferenceSettings): boo
     && left.autoCheckUpdates === right.autoCheckUpdates
     && left.autoDownloadUpdates === right.autoDownloadUpdates
     && left.theme === right.theme
-    && left.language === right.language;
+    && left.language === right.language
+    && shortcutPreferencesEqual(left.shortcuts, right.shortcuts);
+}
+
+function shortcutPreferencesEqual(left: ShortcutPreferences, right: ShortcutPreferences): boolean {
+  for (const platform of shortcutPlatforms) {
+    const leftOverrides = left[platform];
+    const rightOverrides = right[platform];
+    for (const id in leftOverrides) {
+      if (leftOverrides[id as keyof typeof leftOverrides] !== rightOverrides[id as keyof typeof rightOverrides]) return false;
+    }
+    for (const id in rightOverrides) {
+      if (!Object.hasOwn(leftOverrides, id)) return false;
+    }
+  }
+  return true;
+}
+
+function shortcutValidationError(preferences: ShortcutPreferences, t: Translate): string | null {
+  let count = 0;
+  for (const platform of shortcutPlatforms) count += shortcutConflicts(preferences, platform).length;
+  return count === 0 ? null : t('快捷键设置有 {{count}} 个问题。请在“键盘快捷键”部分解决所有平台的问题。', { count });
 }
 
 function integerInRange(value: string, min: number, max: number): number | null {
@@ -89,52 +130,58 @@ function decimalInRange(value: string, min: number, max: number): number | null 
   return number;
 }
 
-function validateDraft(draft: SettingsDraft, t: Translate): { settings: PreferenceSettings | null; error: string | null } {
+function validateDraft(draft: SettingsDraft, t: Translate): { settings: PreferenceSettings | null; error: string | null; tab: SettingsTab | null } {
   const terminalFont = draft.terminalFont.trim();
   const editorFont = draft.editorFont.trim();
   if (terminalFont.length === 0 || terminalFont.length > 160) {
-    return { settings: null, error: t('终端字体必须为 1 到 160 个字符。') };
+    return { settings: null, error: t('终端字体必须为 1 到 160 个字符。'), tab: 'terminal' };
   }
   if (editorFont.length === 0 || editorFont.length > 160) {
-    return { settings: null, error: t('编辑器字体必须为 1 到 160 个字符。') };
+    return { settings: null, error: t('编辑器字体必须为 1 到 160 个字符。'), tab: 'editor' };
   }
-  if (!CSS.supports('font-family', terminalFont) || !CSS.supports('font-family', editorFont)) {
-    return { settings: null, error: t('请输入有效的字体名称或 CSS 字体列表。') };
+  if (!CSS.supports('font-family', terminalFont)) {
+    return { settings: null, error: t('请输入有效的字体名称或 CSS 字体列表。'), tab: 'terminal' };
+  }
+  if (!CSS.supports('font-family', editorFont)) {
+    return { settings: null, error: t('请输入有效的字体名称或 CSS 字体列表。'), tab: 'editor' };
   }
 
   const fontSize = integerInRange(draft.fontSize, 8, 32);
-  if (fontSize === null) return { settings: null, error: t('“{{name}}”必须是 {{min}} 到 {{max}} 之间的整数。', { name: t('终端字号'), min: 8, max: 32 }) };
+  if (fontSize === null) return { settings: null, error: t('“{{name}}”必须是 {{min}} 到 {{max}} 之间的整数。', { name: t('终端字号'), min: 8, max: 32 }), tab: 'terminal' };
 
   const scrollback = integerInRange(draft.scrollback, 100, 200000);
-  if (scrollback === null) return { settings: null, error: t('“{{name}}”必须是 {{min}} 到 {{max}} 之间的整数。', { name: t('回滚行数'), min: 100, max: 200000 }) };
+  if (scrollback === null) return { settings: null, error: t('“{{name}}”必须是 {{min}} 到 {{max}} 之间的整数。', { name: t('回滚行数'), min: 100, max: 200000 }), tab: 'terminal' };
 
   const terminalLineHeight = decimalInRange(draft.terminalLineHeight, 1, 2);
-  if (terminalLineHeight === null) return { settings: null, error: t('终端行高必须是 1 到 2 之间的数字。') };
+  if (terminalLineHeight === null) return { settings: null, error: t('终端行高必须是 1 到 2 之间的数字。'), tab: 'terminal' };
 
   const editorFontSize = integerInRange(draft.editorFontSize, 8, 32);
-  if (editorFontSize === null) return { settings: null, error: t('“{{name}}”必须是 {{min}} 到 {{max}} 之间的整数。', { name: t('编辑器字号'), min: 8, max: 32 }) };
+  if (editorFontSize === null) return { settings: null, error: t('“{{name}}”必须是 {{min}} 到 {{max}} 之间的整数。', { name: t('编辑器字号'), min: 8, max: 32 }), tab: 'editor' };
 
   const databaseResultFontSize = integerInRange(draft.databaseResultFontSize, 10, 24);
-  if (databaseResultFontSize === null) return { settings: null, error: t('“{{name}}”必须是 {{min}} 到 {{max}} 之间的整数。', { name: t('结果字号'), min: 10, max: 24 }) };
+  if (databaseResultFontSize === null) return { settings: null, error: t('“{{name}}”必须是 {{min}} 到 {{max}} 之间的整数。', { name: t('结果字号'), min: 10, max: 24 }), tab: 'database' };
 
   if (!terminalCursorStyles.includes(draft.terminalCursorStyle)) {
-    return { settings: null, error: t('请选择有效的终端光标样式。') };
+    return { settings: null, error: t('请选择有效的终端光标样式。'), tab: 'terminal' };
   }
   if (!editorTabSizes.includes(draft.editorTabSize)) {
-    return { settings: null, error: t('请选择有效的编辑器制表符宽度。') };
+    return { settings: null, error: t('请选择有效的编辑器制表符宽度。'), tab: 'editor' };
   }
   if (!databasePageSizes.includes(draft.databasePageSize)) {
-    return { settings: null, error: t('请选择有效的 MySQL 页面大小。') };
+    return { settings: null, error: t('请选择有效的 MySQL 页面大小。'), tab: 'database' };
   }
   if (draft.databaseRowDensity !== 'comfortable' && draft.databaseRowDensity !== 'compact') {
-    return { settings: null, error: t('请选择有效的结果行密度。') };
+    return { settings: null, error: t('请选择有效的结果行密度。'), tab: 'database' };
   }
   if (draft.language !== 'system' && draft.language !== 'zh-CN' && draft.language !== 'en-US') {
-    return { settings: null, error: t('请选择有效的显示语言。') };
+    return { settings: null, error: t('请选择有效的显示语言。'), tab: 'appearance' };
   }
   if (draft.theme !== 'system' && !themes.some((theme) => theme.id === draft.theme)) {
-    return { settings: null, error: t('请选择有效的应用主题。') };
+    return { settings: null, error: t('请选择有效的应用主题。'), tab: 'appearance' };
   }
+
+  const shortcutError = shortcutValidationError(draft.shortcuts, t);
+  if (shortcutError) return { settings: null, error: shortcutError, tab: 'shortcuts' };
 
   const parsed = preferenceSettingsSchema.safeParse({
     ...draft,
@@ -146,8 +193,8 @@ function validateDraft(draft: SettingsDraft, t: Translate): { settings: Preferen
     terminalFont,
     editorFont
   });
-  if (!parsed.success) return { settings: null, error: t('设置包含无效值。') };
-  return { settings: parsed.data, error: null };
+  if (!parsed.success) return { settings: null, error: t('设置包含无效值。'), tab: null };
+  return { settings: parsed.data, error: null, tab: null };
 }
 
 function fontOptionValue(name: string): string {
@@ -225,7 +272,7 @@ function FontFamilyControl({ id, label, locale, value, fonts, state, pending, on
   </div>;
 }
 
-export default function SettingsPage({ preferences, update, updateLoadError, onNotify, onSave, siteSection }: SettingsPageProps): ReactNode {
+export default function SettingsPage({ preferences, update, updateLoadError, onNotify, onSave, siteSection, selectedTab, onTabChange }: SettingsPageProps): ReactNode {
   const { t, locale } = useI18n();
   const incomingSettings = useMemo(() => settingsFromPreferences(preferences), [
     preferences.autoCheckUpdates,
@@ -247,7 +294,8 @@ export default function SettingsPage({ preferences, update, updateLoadError, onN
     preferences.terminalCursorStyle,
     preferences.terminalFont,
     preferences.terminalLineHeight,
-    preferences.theme
+    preferences.theme,
+    preferences.shortcuts
   ]);
   const [savedBaseline, setSavedBaseline] = useState<PreferenceSettings>(() => incomingSettings);
   const [draft, setDraft] = useState<SettingsDraft>(() => draftFromSettings(incomingSettings));
@@ -288,9 +336,15 @@ export default function SettingsPage({ preferences, update, updateLoadError, onN
   const validation = useMemo(() => validateDraft(draft, t), [draft, locale, t]);
   const dirty = validation.settings === null || !settingsEqual(validation.settings, savedBaseline);
 
+  const validationTab = validation.tab === null ? null : settingsTabs.find((tab) => tab.id === validation.tab) ?? null;
+
   const updateDraft = useCallback((update: Partial<SettingsDraft>) => {
     setDraft((current) => ({ ...current, ...update }));
   }, []);
+
+  const updateShortcuts = useCallback((shortcuts: ShortcutPreferences) => {
+    updateDraft({ shortcuts });
+  }, [updateDraft]);
 
   const restoreDefaults = () => {
     updateDraft(draftFromSettings(defaultPreferenceSettings()));
@@ -319,12 +373,16 @@ export default function SettingsPage({ preferences, update, updateLoadError, onN
       <div className="preferences-header-copy">
         <h1 id="settings-page-title">{t('设置')}</h1>
         <p>{t('这些设备设置会在登录状态变化后继续保留。')}</p>
-        {validation.error && <p className="settings-validation" role="alert"><CircleAlert size={15} aria-hidden="true" />{validation.error}</p>}
+        {validation.error && <div className="settings-validation" role="alert">
+          <CircleAlert size={15} aria-hidden="true" />
+          <span>{validation.error}</span>
+          {validationTab && selectedTab !== validationTab.id && <Button className="settings-validation-action" type="button" variant="tertiary" onPress={() => onTabChange(validationTab.id)}>{t('转到 {{category}}', { category: t(validationTab.label) })}</Button>}
+        </div>}
       </div>
       <div className="settings-header-actions">
         {dirty && <span className="preferences-dirty" aria-live="polite">{t('有未保存的更改。')}</span>}
         <div>
-          <Button className="app-action button-quiet" form="settings-preferences-form" isDisabled={pending} type="button" variant="tertiary" onPress={restoreDefaults}><RotateCcw size={15} aria-hidden="true" />{t('恢复默认值')}</Button>
+          <Button className="app-action button-quiet" form="settings-preferences-form" isDisabled={pending} type="button" variant="tertiary" onPress={restoreDefaults}><RotateCcw size={15} aria-hidden="true" />{t('恢复全部默认设置')}</Button>
           <Button className="app-action button-primary" form="settings-preferences-form" isDisabled={pending || !dirty || validation.settings === null} type="submit" variant="primary">{pending ? <LoaderCircle className="spin" size={15} aria-hidden="true" /> : <Save size={15} aria-hidden="true" />}{pending ? t('正在保存设置…') : t('保存并应用')}</Button>
         </div>
       </div>
@@ -332,105 +390,118 @@ export default function SettingsPage({ preferences, update, updateLoadError, onN
 
     <form id="settings-preferences-form" className="preferences-form" onSubmit={(event) => void submit(event)} aria-busy={pending} noValidate>
       <fieldset className="settings-controls" disabled={pending}>
-      <AppUpdateSection update={update} loadError={updateLoadError} preferences={draft} pending={pending} installBlocked={dirty || pending} onPreferencesChange={updateDraft} onNotify={onNotify} />
-      <section className="settings-section" aria-labelledby="appearance-settings-title">
-        <div className="settings-section-heading"><div><h2 id="appearance-settings-title">{t('外观与语言')}</h2><p>{t('选择应用主题和显示语言。主题将在保存后应用。')}</p></div></div>
-        <div className="settings-grid">
-          <Select className="settings-field settings-select" fullWidth isDisabled={pending} selectedKey={draft.language} variant="secondary" onSelectionChange={(key) => {
-            if (key !== null) updateDraft({ language: String(key) as SettingsDraft['language'] });
-          }}>
-            <Label>{t('显示语言')}</Label>
-            <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-            <Select.Popover className="settings-select-popover"><ListBox disabledKeys={pending ? ['system', 'zh-CN', 'en-US'] : undefined}><ListBox.Item id="system">{t('跟随系统')}</ListBox.Item><ListBox.Item id="zh-CN">{t('简体中文')}</ListBox.Item><ListBox.Item id="en-US">{t('English')}</ListBox.Item></ListBox></Select.Popover>
-          </Select>
-          <Select className="settings-field settings-select" fullWidth isDisabled={pending} selectedKey={draft.theme} variant="secondary" onSelectionChange={(key) => {
-            if (key !== null) updateDraft({ theme: String(key) as SettingsDraft['theme'] });
-          }}>
-            <Label>{t('应用主题')}</Label>
-            <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-            <Select.Popover className="settings-select-popover"><ListBox disabledKeys={pending ? ['system', ...themes.map((theme) => theme.id)] : undefined}><ListBox.Item id="system">{t('跟随系统')}</ListBox.Item>{themes.map((theme) => <ListBox.Item key={theme.id} id={theme.id}>{theme.name}</ListBox.Item>)}</ListBox></Select.Popover>
-          </Select>
-        </div>
-        <div className="settings-theme-cards" aria-label={t('应用主题')}>
-          {themes.map((theme) => <Button key={theme.id} aria-pressed={draft.theme === theme.id} className={draft.theme === theme.id ? 'settings-theme-card is-selected' : 'settings-theme-card'} isDisabled={pending} type="button" variant="secondary" onPress={() => updateDraft({ theme: theme.id })}>
-            <div className="settings-theme-preview" style={theme.colors as CSSProperties} aria-hidden="true"><div><i /><b /><em /></div><span><strong>JumpServer</strong><small>$ echo ready</small></span></div>
-            <span className="settings-theme-name">{theme.name}</span>{draft.theme === theme.id && <Check size={15} aria-label={t('已选择')} />}
-          </Button>)}
-        </div>
-      </section>
+        <Tabs align="start" className="settings-tabs" selectedKey={selectedTab} variant="secondary" onSelectionChange={(key) => {
+          const tab = String(key);
+          if (isSettingsTab(tab)) onTabChange(tab);
+        }}>
+          <Tabs.ListContainer className="settings-tabs-list-container">
+            <Tabs.List aria-label={t('设置类别')} className="settings-tabs-list">
+              {settingsTabs.map((tab) => <Tabs.Tab key={tab.id} id={tab.id}>{t(tab.label)}<Tabs.Indicator /></Tabs.Tab>)}
+            </Tabs.List>
+          </Tabs.ListContainer>
+          <Tabs.Panel key={selectedTab} className="settings-tabs-panel" id={selectedTab}>
+            {selectedTab === 'appearance' && <section className="settings-section" aria-labelledby="appearance-settings-title">
+              <div className="settings-section-heading"><div><h2 id="appearance-settings-title">{t('外观与语言')}</h2><p>{t('选择应用主题和显示语言。主题将在保存后应用。')}</p></div></div>
+              <div className="settings-grid">
+                <Select className="settings-field settings-select" fullWidth isDisabled={pending} selectedKey={draft.language} variant="secondary" onSelectionChange={(key) => {
+                  if (key !== null) updateDraft({ language: String(key) as SettingsDraft['language'] });
+                }}>
+                  <Label>{t('显示语言')}</Label>
+                  <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+                  <Select.Popover className="settings-select-popover"><ListBox disabledKeys={pending ? ['system', 'zh-CN', 'en-US'] : undefined}><ListBox.Item id="system">{t('跟随系统')}</ListBox.Item><ListBox.Item id="zh-CN">{t('简体中文')}</ListBox.Item><ListBox.Item id="en-US">{t('English')}</ListBox.Item></ListBox></Select.Popover>
+                </Select>
+                <Select className="settings-field settings-select" fullWidth isDisabled={pending} selectedKey={draft.theme} variant="secondary" onSelectionChange={(key) => {
+                  if (key !== null) updateDraft({ theme: String(key) as SettingsDraft['theme'] });
+                }}>
+                  <Label>{t('应用主题')}</Label>
+                  <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+                  <Select.Popover className="settings-select-popover"><ListBox disabledKeys={pending ? ['system', ...themes.map((theme) => theme.id)] : undefined}><ListBox.Item id="system">{t('跟随系统')}</ListBox.Item>{themes.map((theme) => <ListBox.Item key={theme.id} id={theme.id}>{theme.name}</ListBox.Item>)}</ListBox></Select.Popover>
+                </Select>
+              </div>
+              <div className="settings-theme-cards" aria-label={t('应用主题')}>
+                {themes.map((theme) => <Button key={theme.id} aria-pressed={draft.theme === theme.id} className={draft.theme === theme.id ? 'settings-theme-card is-selected' : 'settings-theme-card'} isDisabled={pending} type="button" variant="secondary" onPress={() => updateDraft({ theme: theme.id })}>
+                  <div className="settings-theme-preview" style={theme.colors as CSSProperties} aria-hidden="true"><div><i /><b /><em /></div><span><strong>JumpServer</strong><small>$ echo ready</small></span></div>
+                  <span className="settings-theme-name">{theme.name}</span>{draft.theme === theme.id && <Check size={15} aria-label={t('已选择')} />}
+                </Button>)}
+              </div>
+            </section>}
 
-      <section className="settings-section" aria-labelledby="terminal-settings-title">
-        <div className="settings-section-heading"><div><h2 id="terminal-settings-title">{t('终端')}</h2><p>{t('控制新建和已打开终端的字体、光标与缓冲行为。')}</p></div></div>
-        <div className="settings-stack">
-          <div className="settings-field is-wide"><label htmlFor="settings-terminal-font">{t('终端字体')}</label><FontFamilyControl id="settings-terminal-font" label={t('终端字体')} locale={locale} value={draft.terminalFont} fonts={fontState.fonts} state={fontState} pending={pending} onChange={(terminalFont) => updateDraft({ terminalFont })} onRetry={() => void loadFonts(true)} t={t} /></div>
-          <div className="settings-grid">
-            <label className="settings-field" htmlFor="settings-terminal-size"><span>{t('终端字号')}</span><Input id="settings-terminal-size" aria-invalid={integerInRange(draft.fontSize, 8, 32) === null} fullWidth inputMode="numeric" disabled={pending} type="text" value={draft.fontSize} variant="secondary" onChange={(event) => updateDraft({ fontSize: event.target.value })} /></label>
-            <Select className="settings-field settings-select" fullWidth isDisabled={pending} selectedKey={draft.terminalCursorStyle} variant="secondary" onSelectionChange={(key) => {
-              if (key !== null) updateDraft({ terminalCursorStyle: String(key) as SettingsDraft['terminalCursorStyle'] });
-            }}>
-              <Label>{t('光标样式')}</Label>
-              <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-              <Select.Popover className="settings-select-popover"><ListBox disabledKeys={pending ? [...terminalCursorStyles] : undefined}><ListBox.Item id="block">{t('方块')}</ListBox.Item><ListBox.Item id="underline">{t('下划线')}</ListBox.Item><ListBox.Item id="bar">{t('竖线')}</ListBox.Item></ListBox></Select.Popover>
-            </Select>
-            <label className="settings-field" htmlFor="settings-line-height"><span>{t('终端行高')}</span><Input id="settings-line-height" aria-invalid={decimalInRange(draft.terminalLineHeight, 1, 2) === null} fullWidth inputMode="decimal" disabled={pending} type="text" value={draft.terminalLineHeight} variant="secondary" onChange={(event) => updateDraft({ terminalLineHeight: event.target.value })} /></label>
-            <label className="settings-field" htmlFor="settings-scrollback"><span>{t('回滚行数')}</span><Input id="settings-scrollback" aria-invalid={integerInRange(draft.scrollback, 100, 200000) === null} fullWidth inputMode="numeric" disabled={pending} type="text" value={draft.scrollback} variant="secondary" onChange={(event) => updateDraft({ scrollback: event.target.value })} /></label>
-          </div>
-          <div className="settings-toggle-row">
-            <Switch isDisabled={pending} isSelected={draft.terminalCursorBlink} size="sm" onChange={(terminalCursorBlink) => updateDraft({ terminalCursorBlink })}><Switch.Content><Label>{t('光标闪烁')}</Label><Switch.Control><Switch.Thumb /></Switch.Control></Switch.Content></Switch>
-            <Switch isDisabled={pending} isSelected={draft.terminalCopyOnSelect} size="sm" onChange={(terminalCopyOnSelect) => updateDraft({ terminalCopyOnSelect })}><Switch.Content><Label>{t('选中时复制')}</Label><Switch.Control><Switch.Thumb /></Switch.Control></Switch.Content></Switch>
-          </div>
-        </div>
-      </section>
+            {selectedTab === 'terminal' && <section className="settings-section" aria-labelledby="terminal-settings-title">
+              <div className="settings-section-heading"><div><h2 id="terminal-settings-title">{t('终端')}</h2><p>{t('控制新建和已打开终端的字体、光标与缓冲行为。')}</p></div></div>
+              <div className="settings-stack">
+                <div className="settings-field is-wide"><label htmlFor="settings-terminal-font">{t('终端字体')}</label><FontFamilyControl id="settings-terminal-font" label={t('终端字体')} locale={locale} value={draft.terminalFont} fonts={fontState.fonts} state={fontState} pending={pending} onChange={(terminalFont) => updateDraft({ terminalFont })} onRetry={() => void loadFonts(true)} t={t} /></div>
+                <div className="settings-grid">
+                  <label className="settings-field" htmlFor="settings-terminal-size"><span>{t('终端字号')}</span><Input id="settings-terminal-size" aria-invalid={integerInRange(draft.fontSize, 8, 32) === null} fullWidth inputMode="numeric" disabled={pending} type="text" value={draft.fontSize} variant="secondary" onChange={(event) => updateDraft({ fontSize: event.target.value })} /></label>
+                  <Select className="settings-field settings-select" fullWidth isDisabled={pending} selectedKey={draft.terminalCursorStyle} variant="secondary" onSelectionChange={(key) => {
+                    if (key !== null) updateDraft({ terminalCursorStyle: String(key) as SettingsDraft['terminalCursorStyle'] });
+                  }}>
+                    <Label>{t('光标样式')}</Label>
+                    <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+                    <Select.Popover className="settings-select-popover"><ListBox disabledKeys={pending ? [...terminalCursorStyles] : undefined}><ListBox.Item id="block">{t('方块')}</ListBox.Item><ListBox.Item id="underline">{t('下划线')}</ListBox.Item><ListBox.Item id="bar">{t('竖线')}</ListBox.Item></ListBox></Select.Popover>
+                  </Select>
+                  <label className="settings-field" htmlFor="settings-line-height"><span>{t('终端行高')}</span><Input id="settings-line-height" aria-invalid={decimalInRange(draft.terminalLineHeight, 1, 2) === null} fullWidth inputMode="decimal" disabled={pending} type="text" value={draft.terminalLineHeight} variant="secondary" onChange={(event) => updateDraft({ terminalLineHeight: event.target.value })} /></label>
+                  <label className="settings-field" htmlFor="settings-scrollback"><span>{t('回滚行数')}</span><Input id="settings-scrollback" aria-invalid={integerInRange(draft.scrollback, 100, 200000) === null} fullWidth inputMode="numeric" disabled={pending} type="text" value={draft.scrollback} variant="secondary" onChange={(event) => updateDraft({ scrollback: event.target.value })} /></label>
+                </div>
+                <div className="settings-toggle-row">
+                  <Switch isDisabled={pending} isSelected={draft.terminalCursorBlink} size="sm" onChange={(terminalCursorBlink) => updateDraft({ terminalCursorBlink })}><Switch.Content><Label>{t('光标闪烁')}</Label><Switch.Control><Switch.Thumb /></Switch.Control></Switch.Content></Switch>
+                  <Switch isDisabled={pending} isSelected={draft.terminalCopyOnSelect} size="sm" onChange={(terminalCopyOnSelect) => updateDraft({ terminalCopyOnSelect })}><Switch.Content><Label>{t('选中时复制')}</Label><Switch.Control><Switch.Thumb /></Switch.Control></Switch.Content></Switch>
+                </div>
+              </div>
+            </section>}
 
-      <section className="settings-section" aria-labelledby="database-settings-title">
-        <div className="settings-section-heading"><div><h2 id="database-settings-title">{t('MySQL')}</h2><p>{t('设置查询结果、表格与 SQL 编辑行为。')}</p></div></div>
-        <div className="settings-stack">
-        <div className="settings-grid">
-          <Select className="settings-field settings-select" fullWidth isDisabled={pending} selectedKey={draft.databasePageSize} variant="secondary" onSelectionChange={(key) => {
-            if (key !== null) updateDraft({ databasePageSize: Number(key) as SettingsDraft['databasePageSize'] });
-          }}>
-            <Label>{t('每页结果数')}</Label>
-            <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-            <Select.Popover className="settings-select-popover"><ListBox disabledKeys={pending ? [...databasePageSizes] : undefined}>{databasePageSizes.map((size) => <ListBox.Item key={size} id={size}>{t('{{count}} 行', { count: size })}</ListBox.Item>)}</ListBox></Select.Popover>
-          </Select>
-          <label className="settings-field" htmlFor="settings-result-size"><span>{t('结果字号')}</span><Input id="settings-result-size" aria-invalid={integerInRange(draft.databaseResultFontSize, 10, 24) === null} fullWidth inputMode="numeric" disabled={pending} type="text" value={draft.databaseResultFontSize} variant="secondary" onChange={(event) => updateDraft({ databaseResultFontSize: event.target.value })} /></label>
-          <Select className="settings-field settings-select" fullWidth isDisabled={pending} selectedKey={draft.databaseRowDensity} variant="secondary" onSelectionChange={(key) => {
-            if (key !== null) updateDraft({ databaseRowDensity: String(key) as SettingsDraft['databaseRowDensity'] });
-          }}>
-            <Label>{t('结果行密度')}</Label>
-            <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-            <Select.Popover className="settings-select-popover"><ListBox disabledKeys={pending ? ['comfortable', 'compact'] : undefined}><ListBox.Item id="comfortable">{t('舒适')}</ListBox.Item><ListBox.Item id="compact">{t('紧凑')}</ListBox.Item></ListBox></Select.Popover>
-          </Select>
-        </div>
-        <div className="settings-toggle-row">
-          <Switch isDisabled={pending} isSelected={draft.databaseWordWrap} size="sm" onChange={(databaseWordWrap) => updateDraft({ databaseWordWrap })}><Switch.Content><Label>{t('SQL 自动换行')}</Label><Switch.Control><Switch.Thumb /></Switch.Control></Switch.Content></Switch>
-          <Switch isDisabled={pending} isSelected={draft.databaseShowLineNumbers} size="sm" onChange={(databaseShowLineNumbers) => updateDraft({ databaseShowLineNumbers })}><Switch.Content><Label>{t('显示 SQL 行号')}</Label><Switch.Control><Switch.Thumb /></Switch.Control></Switch.Content></Switch>
-        </div>
-        </div>
-      </section>
+            {selectedTab === 'database' && <section className="settings-section" aria-labelledby="database-settings-title">
+              <div className="settings-section-heading"><div><h2 id="database-settings-title">{t('MySQL')}</h2><p>{t('设置查询结果、表格与 SQL 编辑行为。')}</p></div></div>
+              <div className="settings-stack">
+                <div className="settings-grid">
+                  <Select className="settings-field settings-select" fullWidth isDisabled={pending} selectedKey={draft.databasePageSize} variant="secondary" onSelectionChange={(key) => {
+                    if (key !== null) updateDraft({ databasePageSize: Number(key) as SettingsDraft['databasePageSize'] });
+                  }}>
+                    <Label>{t('每页结果数')}</Label>
+                    <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+                    <Select.Popover className="settings-select-popover"><ListBox disabledKeys={pending ? [...databasePageSizes] : undefined}>{databasePageSizes.map((size) => <ListBox.Item key={size} id={size}>{t('{{count}} 行', { count: size })}</ListBox.Item>)}</ListBox></Select.Popover>
+                  </Select>
+                  <label className="settings-field" htmlFor="settings-result-size"><span>{t('结果字号')}</span><Input id="settings-result-size" aria-invalid={integerInRange(draft.databaseResultFontSize, 10, 24) === null} fullWidth inputMode="numeric" disabled={pending} type="text" value={draft.databaseResultFontSize} variant="secondary" onChange={(event) => updateDraft({ databaseResultFontSize: event.target.value })} /></label>
+                  <Select className="settings-field settings-select" fullWidth isDisabled={pending} selectedKey={draft.databaseRowDensity} variant="secondary" onSelectionChange={(key) => {
+                    if (key !== null) updateDraft({ databaseRowDensity: String(key) as SettingsDraft['databaseRowDensity'] });
+                  }}>
+                    <Label>{t('结果行密度')}</Label>
+                    <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+                    <Select.Popover className="settings-select-popover"><ListBox disabledKeys={pending ? ['comfortable', 'compact'] : undefined}><ListBox.Item id="comfortable">{t('舒适')}</ListBox.Item><ListBox.Item id="compact">{t('紧凑')}</ListBox.Item></ListBox></Select.Popover>
+                  </Select>
+                </div>
+                <div className="settings-toggle-row">
+                  <Switch isDisabled={pending} isSelected={draft.databaseWordWrap} size="sm" onChange={(databaseWordWrap) => updateDraft({ databaseWordWrap })}><Switch.Content><Label>{t('SQL 自动换行')}</Label><Switch.Control><Switch.Thumb /></Switch.Control></Switch.Content></Switch>
+                  <Switch isDisabled={pending} isSelected={draft.databaseShowLineNumbers} size="sm" onChange={(databaseShowLineNumbers) => updateDraft({ databaseShowLineNumbers })}><Switch.Content><Label>{t('显示 SQL 行号')}</Label><Switch.Control><Switch.Thumb /></Switch.Control></Switch.Content></Switch>
+                </div>
+              </div>
+            </section>}
 
-      <section className="settings-section" aria-labelledby="editor-settings-title">
-        <div className="settings-section-heading"><div><h2 id="editor-settings-title">{t('文件与代码编辑器')}</h2><p>{t('SQL 与远程文件编辑器共享字体、字号和缩进设置。')}</p></div></div>
-        <div className="settings-stack">
-          <div className="settings-field is-wide"><label htmlFor="settings-editor-font">{t('编辑器字体')}</label><FontFamilyControl id="settings-editor-font" label={t('编辑器字体')} locale={locale} value={draft.editorFont} fonts={fontState.fonts} state={fontState} pending={pending} onChange={(editorFont) => updateDraft({ editorFont })} onRetry={() => void loadFonts(true)} t={t} /></div>
-          <div className="settings-grid">
-            <label className="settings-field" htmlFor="settings-editor-size"><span>{t('编辑器字号')}</span><Input id="settings-editor-size" aria-invalid={integerInRange(draft.editorFontSize, 8, 32) === null} fullWidth inputMode="numeric" disabled={pending} type="text" value={draft.editorFontSize} variant="secondary" onChange={(event) => updateDraft({ editorFontSize: event.target.value })} /></label>
-            <Select className="settings-field settings-select" fullWidth isDisabled={pending} selectedKey={draft.editorTabSize} variant="secondary" onSelectionChange={(key) => {
-              if (key !== null) updateDraft({ editorTabSize: Number(key) as SettingsDraft['editorTabSize'] });
-            }}>
-              <Label>{t('制表符宽度')}</Label>
-              <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-              <Select.Popover className="settings-select-popover"><ListBox disabledKeys={pending ? [...editorTabSizes] : undefined}>{editorTabSizes.map((size) => <ListBox.Item key={size} id={size}>{t('{{count}} 个空格', { count: size })}</ListBox.Item>)}</ListBox></Select.Popover>
-            </Select>
-          </div>
-          <div className="settings-toggle-row">
-            <Switch isDisabled={pending} isSelected={draft.fileWordWrap} size="sm" onChange={(fileWordWrap) => updateDraft({ fileWordWrap })}><Switch.Content><Label>{t('文件自动换行')}</Label><Switch.Control><Switch.Thumb /></Switch.Control></Switch.Content></Switch>
-          </div>
-        </div>
-      </section>
-      {siteSection && <div className="settings-site-slot">{siteSection}</div>}
+            {selectedTab === 'editor' && <section className="settings-section" aria-labelledby="editor-settings-title">
+              <div className="settings-section-heading"><div><h2 id="editor-settings-title">{t('文件与代码编辑器')}</h2><p>{t('SQL 与远程文件编辑器共享字体、字号和缩进设置。')}</p></div></div>
+              <div className="settings-stack">
+                <div className="settings-field is-wide"><label htmlFor="settings-editor-font">{t('编辑器字体')}</label><FontFamilyControl id="settings-editor-font" label={t('编辑器字体')} locale={locale} value={draft.editorFont} fonts={fontState.fonts} state={fontState} pending={pending} onChange={(editorFont) => updateDraft({ editorFont })} onRetry={() => void loadFonts(true)} t={t} /></div>
+                <div className="settings-grid">
+                  <label className="settings-field" htmlFor="settings-editor-size"><span>{t('编辑器字号')}</span><Input id="settings-editor-size" aria-invalid={integerInRange(draft.editorFontSize, 8, 32) === null} fullWidth inputMode="numeric" disabled={pending} type="text" value={draft.editorFontSize} variant="secondary" onChange={(event) => updateDraft({ editorFontSize: event.target.value })} /></label>
+                  <Select className="settings-field settings-select" fullWidth isDisabled={pending} selectedKey={draft.editorTabSize} variant="secondary" onSelectionChange={(key) => {
+                    if (key !== null) updateDraft({ editorTabSize: Number(key) as SettingsDraft['editorTabSize'] });
+                  }}>
+                    <Label>{t('制表符宽度')}</Label>
+                    <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+                    <Select.Popover className="settings-select-popover"><ListBox disabledKeys={pending ? [...editorTabSizes] : undefined}>{editorTabSizes.map((size) => <ListBox.Item key={size} id={size}>{t('{{count}} 个空格', { count: size })}</ListBox.Item>)}</ListBox></Select.Popover>
+                  </Select>
+                </div>
+                <div className="settings-toggle-row">
+                  <Switch isDisabled={pending} isSelected={draft.fileWordWrap} size="sm" onChange={(fileWordWrap) => updateDraft({ fileWordWrap })}><Switch.Content><Label>{t('文件自动换行')}</Label><Switch.Control><Switch.Thumb /></Switch.Control></Switch.Content></Switch>
+                </div>
+              </div>
+            </section>}
+
+            {selectedTab === 'shortcuts' && <ShortcutSettingsSection preferences={draft.shortcuts} disabled={pending} onChange={updateShortcuts} />}
+            {selectedTab === 'updates' && <AppUpdateSection update={update} loadError={updateLoadError} preferences={draft} pending={pending} installBlocked={dirty || pending} onPreferencesChange={updateDraft} onNotify={onNotify} />}
+            {selectedTab === 'sites' && siteSection && <div className="settings-site-slot">{siteSection}</div>}
+          </Tabs.Panel>
+        </Tabs>
       </fieldset>
-
     </form>
   </section>;
 }

@@ -121,6 +121,7 @@ button svg { flex-shrink: 0; }
 .site-popover footer button:hover { background: var(--hover); }
 .library-page-title { display: flex; align-items: center; gap: 14px; height: 42px; padding: 0 6px; }.library-page-title h1 { margin: 0; font-size: 18px; font-weight: 600; }.library-page-title > span { color: var(--dim); font-size: 12px; }
 .library-content { flex: 1; min-height: 0; overflow: auto; padding: 25px 32px 35px; }
+.library-content.is-settings { display: flex; flex-direction: column; overflow: hidden; }
 .collections-section { margin-bottom: 37px; }
 .collections-section h2, .hosts-heading h2 { margin: 0 0 17px; font-size: 14px; font-weight: 600; }
 .collection-grid, .host-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
