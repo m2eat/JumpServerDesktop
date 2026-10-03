@@ -284,7 +284,9 @@ async function withRequestScope<T>(signal: AbortSignal | undefined, action: (sco
     } catch (scopeError) {
       throw scopeError;
     }
-    throw oauthError('network', 'OAuth network request failed');
+    // Only expose Chromium's error code, never request URLs or credential-bearing exception text.
+    const code = error instanceof Error ? error.message.match(/\bnet::ERR_[A-Z0-9_]+\b/)?.[0] : undefined;
+    throw oauthError('network', `OAuth network request failed${code ? `: ${code}` : ''}`);
   } finally {
     scope.dispose();
   }

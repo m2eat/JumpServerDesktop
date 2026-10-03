@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { dialog, utilityProcess } from 'electron';
+import { EventEmitter } from 'node:events';
 import type { AppEvent, ResourceContext, SessionInfo } from '../../../desktop-contract/src/index';
 import type { AdapterHost, AuthorizedSshConnection } from '../host';
 import { SshServiceImpl } from './service';
@@ -43,7 +44,7 @@ class FakeTerminal extends FakeReadable {
   setWindow() {}
 }
 
-class FakeSftp {
+class FakeSftp extends EventEmitter {
   readonly files = new Map<string, Buffer>();
   readonly directories = new Set<string>(['/']);
   readonly opens: Array<{ path: string; flags: string; handle: Buffer }> = [];
@@ -165,7 +166,7 @@ class FakeWorker {
   }
 
   postMessage(message: unknown) {
-    const request = message as { id: string; command: string; args: { path?: string; handleId?: string; roots?: string[] } };
+    const request = message as { id: string; command: string; args: { path?: string; handleId?: string; roots?: string[]; data?: string } };
     const reply = (result: unknown) => queueMicrotask(() => {
       for (const listener of this.listeners.get('message') ?? []) listener({ id: request.id, ok: true, result });
     });
@@ -185,6 +186,8 @@ class FakeWorker {
         reader.sent = true;
         reply({ data: 'YQ==', chunk_sha256: 'ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb', eof: true, sha256: 'ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb' });
       }
+    } else if (request.command === 'writeChunk') {
+      reply({ bytesWritten: Buffer.from(request.args.data!, 'base64').byteLength });
     } else reply(null);
   }
 
@@ -215,6 +218,149 @@ const terminalContext: ResourceContext = {
 const filesContext: ResourceContext = { ...terminalContext, protocol: 'sftp', connectMethod: { component: 'koko', type: 'native', value: 'sftp-client' } };
 
 describe('native SSH transport', () => {
+  it('reconnects a lost directory read once and preserves the file session for concurrent requests', async () => {
+    const host = new FakeHost();
+    const replacement = new FakeSftp();
+    replacement.files.set('/recovered.txt', Buffer.from('recovered'));
+    const authorize = vi.spyOn(host, 'authorizeNative');
+    const service = new SshServiceImpl(host);
+    const session = await service.open('files', filesContext);
+    authorize.mockResolvedValue({ client: new FakeClient(replacement) as never, close() {} });
+    vi.spyOn(host.sftp, 'readdir').mockImplementation((_path, done) => done(new Error('connection lost')));
+
+    const results = await Promise.all([
+      service.invoke('files.list', { sessionId: session.id, path: '/' }),
+      service.invoke('files.list', { sessionId: session.id, path: '/' })
+    ]);
+    for (const result of results) expect(result).toMatchObject({ entries: [{ name: 'recovered.txt' }] });
+    expect(authorize).toHaveBeenCalledTimes(2);
+    expect(host.updates.at(-1)).toMatchObject({ id: session.id, phase: 'active' });
+    await service.closeAll();
+  });
+
+  it('automatically reconnects a closed SFTP channel without replaying a mutation', async () => {
+    const host = new FakeHost();
+    host.sftp.files.set('/notes.txt', Buffer.from('before'));
+    const replacement = new FakeSftp();
+    replacement.files.set('/notes.txt', Buffer.from('before'));
+    const authorize = vi.spyOn(host, 'authorizeNative');
+    const service = new SshServiceImpl(host);
+    const session = await service.open('files', filesContext);
+    authorize.mockResolvedValue({ client: new FakeClient(replacement) as never, close() {} });
+    const unlink = vi.spyOn(host.sftp, 'unlink').mockImplementation((_path, done) => done(new Error('connection lost')));
+    await expect(service.invoke('files.remove', { sessionId: session.id, path: '/notes.txt', directory: false })).rejects.toThrow('connection lost');
+    await vi.waitFor(() => expect(authorize).toHaveBeenCalledTimes(2));
+    expect(unlink).toHaveBeenCalledTimes(1);
+    expect(await service.invoke('files.readText', { sessionId: session.id, path: '/notes.txt' })).toMatchObject({ content: 'before' });
+    host.sftp.emit('close');
+    expect(host.updates.at(-1)?.phase).toBe('active');
+    replacement.emit('close');
+    await vi.waitFor(() => expect(authorize).toHaveBeenCalledTimes(3));
+    await service.closeAll();
+  });
+
+  it('does not reconnect for a permission error', async () => {
+    const host = new FakeHost();
+    const authorize = vi.spyOn(host, 'authorizeNative');
+    const service = new SshServiceImpl(host);
+    const session = await service.open('files', filesContext);
+    vi.spyOn(host.sftp, 'readdir').mockImplementation((_path, done) => done(Object.assign(new Error('Permission denied'), { code: 3 })));
+    await expect(service.invoke('files.list', { sessionId: session.id, path: '/' })).rejects.toThrow('Permission denied');
+    expect(authorize).toHaveBeenCalledTimes(1);
+    await service.closeAll();
+  });
+
+  it('stops automatic recovery after authorization fails', async () => {
+    const host = new FakeHost();
+    const authorize = vi.spyOn(host, 'authorizeNative');
+    const service = new SshServiceImpl(host);
+    const session = await service.open('files', filesContext);
+    authorize.mockRejectedValue(new Error('Permission revoked'));
+    host.sftp.emit('close');
+    await vi.waitFor(() => expect(host.updates.at(-1)).toMatchObject({ id: session.id, phase: 'lost', error: 'Permission revoked' }));
+    expect(authorize).toHaveBeenCalledTimes(2);
+    await service.closeAll();
+  });
+
+  it('ignores old SSH close events while fresh authorization is pending', async () => {
+    const host = new FakeHost();
+    const authorize = vi.spyOn(host, 'authorizeNative');
+    const service = new SshServiceImpl(host);
+    const session = await service.open('files', filesContext);
+    const pending = Promise.withResolvers<AuthorizedSshConnection>();
+    authorize.mockReturnValue(pending.promise);
+    host.sftp.emit('close');
+    await vi.waitFor(() => expect(host.updates.at(-1)?.phase).toBe('connecting'));
+    for (const listener of host.client.listeners.get('close') ?? []) listener();
+    const replacement = new FakeSftp();
+    replacement.files.set('/notes.txt', Buffer.from('fresh'));
+    pending.resolve({ client: new FakeClient(replacement) as never, close() {} });
+    await expect(service.invoke('files.readText', { sessionId: session.id, path: '/notes.txt' })).resolves.toMatchObject({ content: 'fresh' });
+    expect(host.updates.at(-1)?.error).toBeUndefined();
+    await service.closeAll();
+  });
+
+  it('does not revive a file session closed during authorization', async () => {
+    const host = new FakeHost();
+    const authorize = vi.spyOn(host, 'authorizeNative');
+    const service = new SshServiceImpl(host);
+    const session = await service.open('files', filesContext);
+    const pending = Promise.withResolvers<AuthorizedSshConnection>();
+    authorize.mockReturnValue(pending.promise);
+    host.sftp.emit('close');
+    await vi.waitFor(() => expect(host.updates.at(-1)?.phase).toBe('connecting'));
+    await service.closeAll();
+    const close = vi.fn();
+    pending.resolve({ client: new FakeClient(new FakeSftp()) as never, close });
+    await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+    expect(host.updates.at(-1)).toMatchObject({ id: session.id, phase: 'closed' });
+    await expect(service.invoke('files.list', { sessionId: session.id, path: '/' })).rejects.toThrow('文件会话不存在或已关闭');
+  });
+
+  it('treats a numeric SFTP connection-loss status during truncate as an unknown save, never replaying it', async () => {
+    const host = new FakeHost();
+    host.sftp.files.set('/notes.txt', Buffer.from('before'));
+    const service = new SshServiceImpl(host);
+    const session = await service.open('files', filesContext);
+    const initial = await service.invoke('files.readText', { sessionId: session.id, path: '/notes.txt' }) as { version: string };
+    const open = host.sftp.open.bind(host.sftp);
+    let writes = 0;
+    vi.spyOn(host.sftp, 'open').mockImplementation((path, flags, done) => {
+      if (flags === 'w') {
+        writes++;
+        host.sftp.files.set(path, Buffer.alloc(0));
+        done(Object.assign(new Error('Transport unavailable'), { code: 7 }));
+      } else open(path, flags, done);
+    });
+    await expect(service.invoke('files.saveText', { sessionId: session.id, path: '/notes.txt', content: 'after', version: initial.version })).rejects.toThrow('保存结果未知');
+    expect(writes).toBe(1);
+    expect(host.sftp.files.get('/notes.txt')).toEqual(Buffer.alloc(0));
+    await service.closeAll();
+  });
+
+  it('keeps a completed download completed when its connection subsequently drops', async () => {
+    vi.mocked(utilityProcess.fork).mockReturnValue(new FakeWorker() as never);
+    const host = new FakeHost();
+    host.sftp.files.set('/notes.txt', Buffer.from('downloaded'));
+    const authorize = vi.spyOn(host, 'authorizeNative');
+    const service = new SshServiceImpl(host);
+    const session = await service.open('files', filesContext);
+    const task = await service.invoke('files.downloadLocal', {
+      sessionId: session.id, path: '/notes.txt', name: 'notes.txt', targetPath: '/safe/notes.txt'
+    }) as { id: string };
+    const taskEvents = () => host.events.filter((event): event is Extract<AppEvent, { type: 'task' }> => event.type === 'task' && event.task.id === task.id);
+    await vi.waitFor(() => expect(taskEvents().at(-1)?.task).toMatchObject({ phase: 'completed', transferred: 10 }));
+    const published = taskEvents().length;
+    host.sftp.emit('close');
+    await vi.waitFor(() => {
+      expect(authorize).toHaveBeenCalledTimes(2);
+      expect(host.updates.at(-1)?.phase).toBe('active');
+    });
+    expect(taskEvents()).toHaveLength(published);
+    await expect(service.invoke('files.list', { sessionId: session.id, path: '/' })).resolves.toMatchObject({ entries: [{ name: 'notes.txt' }] });
+    await service.closeAll();
+  });
+
   it('forwards stdout and stderr through one acknowledgement budget before pausing both streams', async () => {
     const host = new FakeHost();
     const service = new SshServiceImpl(host);

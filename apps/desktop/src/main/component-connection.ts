@@ -1,6 +1,5 @@
-import { randomUUID } from 'node:crypto';
-import { net, session } from 'electron';
-import type { WebSocket as ElectronWebSocket } from 'electron';
+import { net } from 'electron';
+import type { Session as ElectronSession, WebSocket as ElectronWebSocket } from 'electron';
 import { z } from 'zod';
 import type { AuthorizedConnection, SocketEvent, SocketLike } from '../../../../packages/adapters-jumpserver/src/host';
 
@@ -73,6 +72,7 @@ interface ComponentConnectionOptions {
   endpointUrl: string;
   tokenId: string;
   orgId: string;
+  network: ElectronSession;
   assertCurrent(): void;
   onClose(connection: AuthorizedConnection): void;
 }
@@ -83,7 +83,7 @@ export function createComponentConnection(options: ComponentConnectionOptions): 
     throw new Error('组件入口必须是受信的 HTTPS 地址');
   }
   const prefix = endpoint.pathname.replace(/\/+$/, '');
-  const network = session.fromPartition(`memory:jumpserver-component-${randomUUID()}`, { cache: false });
+  const network = options.network;
   const abort = new AbortController();
   const sockets = new Set<ChromiumSocket>();
   let closed = false;

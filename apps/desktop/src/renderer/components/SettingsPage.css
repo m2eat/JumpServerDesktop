@@ -191,6 +191,90 @@
   gap: 14px;
 }
 
+.settings-page .settings-proxy-mode {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.settings-page .settings-proxy-mode legend {
+  margin-bottom: 8px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.settings-page .settings-proxy-mode [role="radiogroup"] {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.settings-page .settings-proxy-option {
+  display: grid;
+  min-width: 0;
+  min-height: 68px;
+  grid-template-columns: minmax(0, 1fr) 16px;
+  align-items: start;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--input-background);
+  cursor: pointer;
+}
+
+.settings-page .settings-proxy-option:hover {
+  border-color: var(--accent-border);
+  color: var(--text);
+}
+
+.settings-page .settings-proxy-option.is-selected {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--accent-soft);
+}
+
+.settings-page .settings-proxy-option:focus-within {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.settings-page .settings-proxy-option-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.settings-page .settings-proxy-option-copy strong {
+  font-size: 12px;
+  font-weight: 560;
+}
+
+.settings-page .settings-proxy-option-copy small,
+.settings-page .settings-proxy-help,
+.settings-page .settings-proxy-details .settings-field > small,
+.settings-page .settings-proxy-note {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.settings-page .settings-proxy-help,
+.settings-page .settings-proxy-note {
+  margin: 0;
+}
+
+.settings-page .settings-proxy-details {
+  display: grid;
+  gap: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-soft);
+}
+
 .settings-page .settings-update-status {
   margin: 0;
   color: var(--text);
@@ -756,7 +840,8 @@
 @container (max-width: 700px) {
   .settings-page .settings-grid,
   .settings-page .settings-toggle-row,
-  .settings-page .settings-update-preferences {
+  .settings-page .settings-update-preferences,
+  .settings-page .settings-proxy-mode [role="radiogroup"] {
     grid-template-columns: minmax(0, 1fr);
   }
 }

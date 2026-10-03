@@ -96,6 +96,8 @@ xattr -dr com.apple.quarantine "/Applications/JumpServer Desktop.app"
 
 终端空闲超时或连接断开后，可点击底部的 **重新连接**。应用使用原资产、账号与连接方式重新走授权流程，在新标签页建立会话；旧标签保留终端输出，不恢复原 shell，也不重放历史输入。连接期间按钮不可重复点击，失败后可再次尝试；不会自动重连以规避服务端空闲超时策略。
 
+SFTP 文件会话检测到 SSH／SFTP 通道断开或请求返回连接丢失时，会在当前操作结束后自动尝试一次重新授权并建立连接，保留原工作区、目录和本地编辑草稿；目录列表和文本读取最多自动重试一次。已完成的传输状态不会因后续断线改变；中断的传输不会自动续传，上传、保存、删除等写操作不会自动重放，未收到写入确认时仍需核验远端结果。重新授权失败后停止自动尝试，可通过文件工作区的“选择主机”重新建立连接；主动关闭会话或退出登录后不会恢复旧连接。
+
 ### 按资产分组浏览
 
 - 左侧分组沿用 JumpServer 的授权节点层级；点击箭头展开子分组，点击名称查看该分组及所有子分组中可访问的资产。桌面端不修改服务器分组。
@@ -113,9 +115,21 @@ xattr -dr com.apple.quarantine "/Applications/JumpServer Desktop.app"
 - 关闭 Sheet 或按 Escape 不会丢失修改和提交报告；提交过程中禁止重复提交。报告可通过底栏重新打开。
 - 提交成功但刷新失败时，**重试刷新** 只重新读取，不重复写入。失败后的编辑保护只有在明确放弃修改并成功重新读取后才解除；提交结果未知时仍需重新连接并核验数据库，不能直接重试。
 
+## 网络代理
+
+打开 **设置 → 网络**，选择 **使用系统代理**（默认）、**直接连接（禁用代理）** 或 **自定义代理**，然后点击 **保存并应用**。未登录时也能修改；设置保存在本机，旧配置自动沿用系统代理。
+
+- 自定义代理使用单个带端口的地址，例如 `http://127.0.0.1:7897`、`https://proxy.example.com:443` 或 `socks5://127.0.0.1:1080`；不支持在地址里保存账号、密码或指定路径。
+- “不使用代理的地址”接受逗号分隔的 Chromium 绕过规则，例如 `localhost,127.0.0.1,*.internal.example.com`。仅自定义模式使用此列表；切换模式保留自定义地址和规则。
+- 保存后无需重启：后续 OAuth 登录、Core 请求和新建 Chen HTTP/WebSocket 连接使用新路由。现有 Chen 连接需重新连接；正在进行的更新下载不会被主动中断。
+- 应用内更新请求也使用此设置。系统浏览器与原生 SSH/SFTP 不受影响，操作系统的代理配置不会被修改。
+- 自定义代理不可用会报错，不会自动回退直连。若系统代理阻断内网站点，可选择直连后重新登录，不必清除已保存的登录凭据。
+
+**English:** Choose System, Direct, or Custom under **Settings → Network**. Settings persist on this device and are available before login. Custom HTTP/HTTPS/SOCKS5 proxies require an explicit port and cannot contain credentials; optional bypass rules are comma-separated. Saved changes apply to subsequent login/API requests and new Chen connections without restarting. Reconnect existing Chen sessions to change their route. Native SSH/SFTP and the system browser are unaffected. An unavailable custom proxy never silently falls back to direct access.
+
 ## 键盘快捷键
 
-设置按「外观、终端、数据库、编辑器、快捷键、关于与更新、站点」分类显示。标签栏和保存按钮保持可见，只有当前类别内容滚动；切换标签保留所有未保存修改，**保存并应用**统一保存各类别草稿。快捷键入口和更新入口直接打开对应标签。
+设置按「外观、网络、终端、数据库、编辑器、快捷键、关于与更新、站点」分类显示。标签栏和保存按钮保持可见，只有当前类别内容滚动；切换标签保留所有未保存修改，**保存并应用**统一保存各类别草稿。快捷键入口和更新入口直接打开对应标签。
 
 打开 **设置 → 快捷键**，可搜索全部 46 项应用动作，录制新组合键、解绑、恢复单项或整个平台的默认值。每个按键显示为独立键帽：macOS 使用 ⌘、⌥、⇧、⌃ 等符号，Windows 使用 Ctrl、Alt、Shift 等文字。macOS、Windows、Linux 的覆盖配置独立保存为设备设置，不随登录身份变化；旧版本设置会自动补齐默认键位。
 

@@ -23,7 +23,7 @@ beforeEach(() => {
     : new Response('Resource action denied', { status: 403 }));
   connection = createComponentConnection({
     endpointUrl: 'https://chen.example/gateway', tokenId: 'core-connection-token', orgId,
-    assertCurrent() {}, onClose() {}
+    network: network as never, assertCurrent() {}, onClose() {}
   });
 });
 afterEach(() => connection.close());

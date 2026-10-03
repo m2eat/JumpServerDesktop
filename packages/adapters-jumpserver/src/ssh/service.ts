@@ -88,6 +88,7 @@ type FileState = {
   ready: Deferred<void>;
   uploadDirectories: Set<string>;
   serial: Promise<void>;
+  reconnecting: Promise<void> | null;
   closed: boolean;
 };
 type TransferControl = {
@@ -192,7 +193,9 @@ function parseArgs<T>(schema: z.ZodType<T>, args: unknown): T {
 
 function operationError(cause: unknown): SshServiceError {
   if (cause instanceof SshServiceError) return cause;
-  return new SshServiceError('remote', cause instanceof Error ? cause.message : 'SSH 操作失败');
+  const error = new SshServiceError('remote', cause instanceof Error ? cause.message : 'SSH 操作失败');
+  error.cause = cause;
+  return error;
 }
 
 function throwIfCancelled(signal: AbortSignal) {
@@ -310,8 +313,17 @@ function isAlreadyExists(error: unknown) {
   const code = error instanceof Error && 'code' in error ? String(error.code) : '';
   return code === 'EEXIST' || /already exists|file exists/i.test(error instanceof Error ? error.message : '');
 }
+
+function isConnectionLost(cause: unknown): boolean {
+  if (!(cause instanceof Error)) return false;
+  if (cause.cause instanceof Error && isConnectionLost(cause.cause)) return true;
+  const code = 'code' in cause ? String(cause.code) : '';
+  return ['6', '7', 'ECONNRESET', 'EPIPE', 'ENOTCONN', 'ETIMEDOUT'].includes(code)
+    || /connection lost|no connection|not connected|connection (?:closed|ended)|socket (?:closed|ended)/i.test(cause.message);
+}
+
 function hasConfirmedSftpRejection(cause: unknown) {
-  if (!(cause instanceof Error) || !('code' in cause)) return false;
+  if (!(cause instanceof Error) || !('code' in cause) || isConnectionLost(cause)) return false;
   const code = cause.code;
   return (typeof code === 'number' && Number.isInteger(code)) || ['EACCES', 'EEXIST', 'ENOENT', 'EPERM'].includes(String(code));
 }
@@ -443,7 +455,7 @@ export class SshServiceImpl implements SshService {
         const input = parseArgs(filePathSchema, args);
         const state = this.requireFiles(input.sessionId);
         ensureRemotePath(input.path);
-        return this.queueFileOperation(state, () => this.listFiles(state, input.path));
+        return this.queueFileOperation(state, () => this.listFiles(state, input.path), true);
       }
       case 'files.mkdir': {
         const input = parseArgs(filePathSchema, args);
@@ -471,7 +483,7 @@ export class SshServiceImpl implements SshService {
         const input = parseArgs(filePathSchema, args);
         const state = this.requireFiles(input.sessionId);
         ensureRemotePath(input.path);
-        return this.queueFileOperation(state, () => this.readText(state, input.path));
+        return this.queueFileOperation(state, () => this.readText(state, input.path), true);
       }
       case 'files.saveText': {
         const input = parseArgs(saveTextSchema, args);
@@ -586,20 +598,9 @@ export class SshServiceImpl implements SshService {
       if (opening.closed) throw new Error('文件会话已关闭');
       const session = this.newSession('files', context, capabilitiesForFiles());
       this.host.update(session);
-      state = { session, connection, sftp: null, ready: createDeferred<void>(), uploadDirectories: new Set(), serial: Promise.resolve(), closed: false };
+      state = { session, connection, sftp: null, ready: createDeferred<void>(), uploadDirectories: new Set(), serial: Promise.resolve(), reconnecting: null, closed: false };
       this.files.set(session.id, state);
-      this.attachClientLifecycle(state, 'files');
-      connection.client.sftp((error, sftp) => {
-        if (error) {
-          this.failFiles(state!, error.message);
-          return;
-        }
-        if (state!.closed || opening.closed) return;
-        state!.sftp = sftp;
-        this.updateSession(state!.session, 'active');
-        state!.ready.resolve(undefined);
-      });
-      await withTimeout(state.ready.promise, 'SFTP 连接超时');
+      await this.connectFileChannel(state);
       return state.session;
     } catch (cause) {
       if (state) {
@@ -612,14 +613,75 @@ export class SshServiceImpl implements SshService {
     }
   }
 
+  private async connectFileChannel(state: FileState) {
+    const connection = state.connection;
+    const ready = state.ready;
+    this.attachClientLifecycle(state, 'files');
+    connection.client.sftp((error, sftp) => {
+      if (state.closed || state.connection !== connection || state.ready !== ready || state.session.phase !== 'connecting') return;
+      if (error) {
+        this.failFiles(state, error.message);
+        return;
+      }
+      state.sftp = sftp;
+      const fail = (message: string) => {
+        if (state.connection === connection && state.sftp === sftp) this.failFiles(state, message);
+      };
+      sftp.on('error', (cause: Error) => fail(cause.message));
+      sftp.on('end', () => fail('SFTP 连接已结束'));
+      sftp.on('close', () => fail('SFTP 连接已关闭'));
+      this.updateSession(state.session, 'active');
+      state.ready.resolve(undefined);
+    });
+    await withTimeout(state.ready.promise, 'SFTP 连接超时');
+  }
+
+  private async ensureFileConnection(state: FileState): Promise<void> {
+    this.assertCurrentFileState(state);
+    if (state.reconnecting) return state.reconnecting;
+    if (state.sftp) return;
+    const reconnect = async () => {
+      state.ready = createDeferred<void>();
+      // Authorization can fail or the workspace can close before channel setup awaits ready.
+      void state.ready.promise.catch(() => {});
+      this.updateSession(state.session, 'connecting');
+      try {
+        this.host.assertContext(state.session.context);
+        const connection = await this.host.authorizeNative(state.session.context, 'files');
+        if (!this.isCurrentFileState(state)) {
+          connection.close();
+          throw new Error('文件会话已关闭');
+        }
+        state.connection = connection;
+        state.uploadDirectories.clear();
+        await this.connectFileChannel(state);
+      } catch (cause) {
+        if (!state.closed) this.failFiles(state, cause instanceof Error ? cause.message : '文件连接失败');
+        throw cause;
+      }
+    };
+    state.reconnecting = reconnect();
+    try {
+      await state.reconnecting;
+    } finally {
+      state.reconnecting = null;
+    }
+  }
+
   private newSession(kind: 'terminal' | 'files', context: ResourceContext, capabilities: Record<string, Capability>): SessionInfo {
     this.generation += 1;
     return { id: randomUUID(), generation: this.generation, kind, phase: 'connecting', detached: false, context, capabilities };
   }
 
   private attachClientLifecycle(state: TerminalState | FileState, kind: 'terminal' | 'files') {
-    const fail = (message: string) => kind === 'terminal' ? this.failTerminal(state as TerminalState, message) : this.failFiles(state as FileState, message);
-    const client = state.connection.client;
+    const connection = state.connection;
+    const ready = state.ready;
+    const fail = (message: string) => {
+      if (state.connection !== connection || state.ready !== ready) return;
+      if (kind === 'terminal') this.failTerminal(state as TerminalState, message);
+      else this.failFiles(state as FileState, message);
+    };
+    const client = connection.client;
     client.on('error', error => fail(error.message));
     client.on('end', () => fail('SSH 连接已结束'));
     client.on('close', () => fail('SSH 连接已关闭'));
@@ -661,7 +723,7 @@ export class SshServiceImpl implements SshService {
 
   private requireFiles(sessionId: string) {
     const state = this.files.get(sessionId);
-    if (!state || state.closed || !state.sftp) throw new Error('文件会话不存在或已关闭');
+    if (!state || state.closed) throw new Error('文件会话不存在或已关闭');
     this.host.assertContext(state.session.context);
     return state;
   }
@@ -679,10 +741,22 @@ export class SshServiceImpl implements SshService {
     if (!this.isCurrentFileState(state)) throw new Error('文件会话已关闭或已由新会话替代');
   }
 
-  private queueFileOperation<T>(state: FileState, operation: () => Promise<T>): Promise<T> {
+  private queueFileOperation<T>(state: FileState, operation: () => Promise<T>, retryRead = false): Promise<T> {
     const guarded = async () => {
-      this.assertCurrentFileState(state);
-      return operation();
+      await this.ensureFileConnection(state);
+      try {
+        return await operation();
+      } catch (cause) {
+        if (isConnectionLost(cause)) this.failFiles(state, (cause as Error).message);
+        if (!retryRead || state.closed || state.sftp) throw cause;
+        await this.ensureFileConnection(state);
+        try {
+          return await operation();
+        } catch (retryCause) {
+          if (isConnectionLost(retryCause)) this.failFiles(state, (retryCause as Error).message);
+          throw retryCause;
+        }
+      }
     };
     const run = state.serial.then(guarded, guarded);
     state.serial = run.then(() => undefined, () => undefined);
@@ -876,7 +950,9 @@ export class SshServiceImpl implements SshService {
       };
     } catch (cause) {
       if (mutationDispatched && !hasConfirmedSftpRejection(cause)) {
-        throw new SshServiceError('unknown', `保存结果未知：${cause instanceof Error ? cause.message : '未收到 SFTP 确认'}；客户端不会自动重试。`);
+        const failure = new SshServiceError('unknown', `保存结果未知：${cause instanceof Error ? cause.message : '未收到 SFTP 确认'}；客户端不会自动重试。`);
+        failure.cause = cause;
+        throw failure;
       }
       throw operationError(cause);
     } finally {
@@ -972,6 +1048,7 @@ export class SshServiceImpl implements SshService {
           throwIfCancelled(control.controller.signal);
           this.publishTask(control, { phase: 'completed', transferred: 0 });
         } catch (cause) {
+          if (isConnectionLost(cause)) this.failFiles(control.file, (cause as Error).message);
           this.settleTransferFailure(control, operationError(cause), '目录创建已停止。');
         }
       });
@@ -1036,6 +1113,7 @@ export class SshServiceImpl implements SshService {
           this.publishTask(control, { phase: 'completed', transferred: offset });
         } catch (cause) {
           createOutcomeUnknown = createDispatched && !remoteOpened && !hasConfirmedSftpRejection(cause);
+          if (isConnectionLost(cause)) this.failFiles(control.file, (cause as Error).message);
           failure = isAlreadyExists(cause)
             ? new SshServiceError('conflict', '远端已有同名文件，未覆盖')
             : operationError(cause);
@@ -1103,6 +1181,7 @@ export class SshServiceImpl implements SshService {
       await this.fileWorker.request('writeFinish', { handleId: writerId });
       completed = true;
     } catch (cause) {
+      if (isConnectionLost(cause)) this.failFiles(source, (cause as Error).message);
       failure = operationError(cause);
     }
     if (!completed && writerStarted) {
@@ -1251,17 +1330,33 @@ export class SshServiceImpl implements SshService {
     const closingError = error ?? '文件会话已关闭';
     this.interruptTransfersForFile(state, phase, closingError);
     state.closed = true;
+    state.sftp = null;
     state.connection.close();
     this.updateSession(state.session, phase, error);
     state.ready.reject(new Error(closingError));
   }
 
   private failFiles(state: FileState, error: string) {
-    this.closeFiles(state, 'lost', error);
+    if (state.closed || state.session.phase === 'lost') return;
+    const wasActive = state.session.phase === 'active';
+    const ready = state.ready;
+    state.sftp = null;
+    this.updateSession(state.session, 'lost', error);
+    state.ready.reject(new Error(error));
+    this.interruptTransfersForFile(state, 'lost', error);
+    state.connection.close();
+    // Wait for in-flight handles and cleanup to settle before replacing the transport.
+    // One automatic attempt; failed authorization must not cause an endless reconnect loop.
+    if (wasActive) {
+      void state.serial.then(() => {
+        if (this.isCurrentFileState(state) && state.ready === ready && !state.sftp) return this.ensureFileConnection(state);
+      }).catch(() => { /* the lost session retains the reconnect error */ });
+    }
   }
 
   private updateSession(session: SessionInfo, phase: SessionInfo['phase'], error?: string) {
-    const next: SessionInfo = { ...session, phase, ...(error ? { error } : {}) };
+    const { error: _previousError, ...current } = session;
+    const next: SessionInfo = { ...current, phase, ...(error ? { error } : {}) };
     session.phase = next.phase;
     if (next.error) session.error = next.error;
     else delete session.error;

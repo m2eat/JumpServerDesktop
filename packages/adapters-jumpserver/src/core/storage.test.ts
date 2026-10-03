@@ -143,11 +143,11 @@ describe('AuthStorage', () => {
     migrated.close();
   });
 
-  it('migrates existing device settings and persists shortcut and update choices without resetting other settings', () => {
+  it('migrates existing device settings and persists new choices without resetting other settings', () => {
     const directory = mkdtempSync(join(tmpdir(), 'jumpserver-desktop-storage-'));
     temporaryDirectories.push(directory);
     const filePath = join(directory, 'desktop.sqlite');
-    const { shortcuts, autoCheckUpdates: _check, autoDownloadUpdates: _download, favorites: _favorites, recent: _recent, ...legacySettings } = defaultPreferences();
+    const { proxy: _proxy, shortcuts, autoCheckUpdates: _check, autoDownloadUpdates: _download, favorites: _favorites, recent: _recent, ...legacySettings } = defaultPreferences();
     legacySettings.fontSize = 19;
     legacySettings.language = 'en-US';
     const database = new DatabaseSync(filePath);
@@ -157,14 +157,15 @@ describe('AuthStorage', () => {
 
     const storage = new AuthStorage(filePath);
     const migrated = storage.getPreferences(null);
-    expect(migrated).toEqual({ ...legacySettings, shortcuts, autoCheckUpdates: true, autoDownloadUpdates: false, favorites: [], recent: [] });
+    expect(migrated).toEqual({ ...legacySettings, proxy: { mode: 'system', server: '', bypass: '' }, shortcuts, autoCheckUpdates: true, autoDownloadUpdates: false, favorites: [], recent: [] });
     shortcuts.darwin['picker.open'] = 'Shift+Meta+KeyP';
     shortcuts.win32['tabs.close'] = null;
-    storage.savePreferences(null, { ...migrated, shortcuts, autoCheckUpdates: false, autoDownloadUpdates: true });
+    const proxy = { mode: 'custom' as const, server: 'socks5://[::1]:1080', bypass: 'localhost,*.internal' };
+    storage.savePreferences(null, { ...migrated, proxy, shortcuts, autoCheckUpdates: false, autoDownloadUpdates: true });
     storage.close();
 
     const reopened = new AuthStorage(filePath);
-    expect(reopened.getPreferences(null)).toEqual({ ...migrated, shortcuts, autoCheckUpdates: false, autoDownloadUpdates: true });
+    expect(reopened.getPreferences(null)).toEqual({ ...migrated, proxy, shortcuts, autoCheckUpdates: false, autoDownloadUpdates: true });
     reopened.close();
   });
 
@@ -177,6 +178,12 @@ describe('AuthStorage', () => {
     expect(() => storage.savePreferences(null, { ...saved, terminalLineHeight: 2.01 })).toThrow();
     expect(() => storage.savePreferences(null, { ...saved, autoCheckUpdates: 'false' })).toThrow();
     expect(() => storage.savePreferences(null, { ...saved, autoDownloadUpdates: 'true' })).toThrow();
+    for (const server of ['http://user:secret@proxy.test:8080', 'http://proxy.test:8080,direct://', 'http://proxy;https=other:8080', 'http://proxy.test', 'socks5://proxy.test:65536']) {
+      expect(() => storage.savePreferences(null, { ...saved, proxy: { mode: 'custom', server, bypass: '' } })).toThrow();
+    }
+    expect(() => storage.savePreferences(null, {
+      ...saved, proxy: { mode: 'direct', server: 'http://user:secret@proxy.test:8080', bypass: '' }
+    })).toThrow();
     expect(() => storage.savePreferences(null, {
       ...saved, shortcuts: { ...saved.shortcuts, darwin: { 'tabs.new': 'Meta+KeyW' } }
     })).toThrow();

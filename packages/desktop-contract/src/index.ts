@@ -111,6 +111,11 @@ export interface ApplyResult {
 export type ThemeId = 'jumpserver' | 'catppuccin-mocha' | 'dracula' | 'nord' | 'tokyo-night' | 'solarized-dark' | 'solarized-light' | 'github-light';
 export type ThemeSetting = ThemeId | 'system';
 export type LanguageSetting = 'system' | 'zh-CN' | 'en-US';
+export interface ProxySettings {
+  mode: 'system' | 'direct' | 'custom';
+  server: string;
+  bypass: string;
+}
 export interface Preferences {
   fontSize: number;
   terminalFont: string;
@@ -132,6 +137,7 @@ export interface Preferences {
   language: LanguageSetting;
   autoCheckUpdates: boolean;
   autoDownloadUpdates: boolean;
+  proxy: ProxySettings;
   shortcuts: ShortcutPreferences;
   favorites: string[];
   recent: ResourceContext[];

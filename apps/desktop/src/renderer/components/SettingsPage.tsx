@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent, ReactNode } from 'react';
-import { Button, ComboBox, Input, Label, ListBox, Select, Switch, Tabs } from '@heroui/react';
+import { Button, ComboBox, Input, Label, ListBox, Radio, RadioGroup, Select, Switch, Tabs } from '@heroui/react';
 import { Check, CircleAlert, LoaderCircle, RefreshCw, RotateCcw, Save } from 'lucide-react';
 import type { AppUpdateState, PreferenceSettings, Preferences } from '@shared/index';
-import { defaultPreferenceSettings, preferenceSettingsSchema } from '@shared/preferences';
+import { defaultPreferenceSettings, preferenceSettingsSchema, proxySettingsSchema } from '@shared/preferences';
 import { shortcutConflicts, type ShortcutPlatform, type ShortcutPreferences } from '@shared/shortcuts';
 import { useI18n } from '../i18n';
 import { themes } from '../themes';
@@ -11,7 +11,7 @@ import AppUpdateSection from './AppUpdateSection';
 import ShortcutSettingsSection from './ShortcutSettingsSection';
 import './SettingsPage.css';
 
-export type SettingsTab = 'appearance' | 'terminal' | 'database' | 'editor' | 'shortcuts' | 'updates' | 'sites';
+export type SettingsTab = 'appearance' | 'network' | 'terminal' | 'database' | 'editor' | 'shortcuts' | 'updates' | 'sites';
 
 interface SettingsPageProps {
   preferences: Preferences;
@@ -40,6 +40,14 @@ type SettingsDraft = Omit<PreferenceSettings, 'fontSize' | 'scrollback' | 'termi
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
 
+type DraftValidation = {
+  settings: PreferenceSettings | null;
+  error: string | null;
+  tab: SettingsTab | null;
+  proxyServerInvalid?: boolean;
+  proxyBypassInvalid?: boolean;
+};
+
 const terminalCursorStyles = ['block', 'underline', 'bar'] as const;
 const editorTabSizes = [2, 4, 8] as const;
 const databasePageSizes = [50, 100, 200, 500] as const;
@@ -47,6 +55,7 @@ const shortcutPlatforms: readonly ShortcutPlatform[] = ['darwin', 'win32', 'linu
 
 const settingsTabs: readonly { id: SettingsTab; label: string }[] = [
   { id: 'appearance', label: '外观' },
+  { id: 'network', label: '网络' },
   { id: 'terminal', label: '终端' },
   { id: 'database', label: '数据库' },
   { id: 'editor', label: '编辑器' },
@@ -95,6 +104,9 @@ function settingsEqual(left: PreferenceSettings, right: PreferenceSettings): boo
     && left.autoDownloadUpdates === right.autoDownloadUpdates
     && left.theme === right.theme
     && left.language === right.language
+    && left.proxy.mode === right.proxy.mode
+    && left.proxy.server === right.proxy.server
+    && left.proxy.bypass === right.proxy.bypass
     && shortcutPreferencesEqual(left.shortcuts, right.shortcuts);
 }
 
@@ -130,7 +142,16 @@ function decimalInRange(value: string, min: number, max: number): number | null 
   return number;
 }
 
-function validateDraft(draft: SettingsDraft, t: Translate): { settings: PreferenceSettings | null; error: string | null; tab: SettingsTab | null } {
+function validateDraft(draft: SettingsDraft, t: Translate): DraftValidation {
+  const proxyValidation = proxySettingsSchema.safeParse(draft.proxy);
+  if (!proxyValidation.success) {
+    const proxyServerInvalid = proxyValidation.error.issues.some((issue) => issue.path[0] === 'server');
+    const proxyBypassInvalid = proxyValidation.error.issues.some((issue) => issue.path[0] === 'bypass');
+    const error = !proxyServerInvalid && proxyBypassInvalid
+      ? t('代理绕过规则必须不超过 2048 个字符，且不能包含控制字符。')
+      : t('代理地址必须是含有效端口的 HTTP、HTTPS 或 SOCKS5 地址，且不能包含账号、密码或路径。');
+    return { settings: null, error, tab: 'network', proxyServerInvalid, proxyBypassInvalid };
+  }
   const terminalFont = draft.terminalFont.trim();
   const editorFont = draft.editorFont.trim();
   if (terminalFont.length === 0 || terminalFont.length > 160) {
@@ -180,6 +201,7 @@ function validateDraft(draft: SettingsDraft, t: Translate): { settings: Preferen
     return { settings: null, error: t('请选择有效的应用主题。'), tab: 'appearance' };
   }
 
+
   const shortcutError = shortcutValidationError(draft.shortcuts, t);
   if (shortcutError) return { settings: null, error: shortcutError, tab: 'shortcuts' };
 
@@ -191,7 +213,8 @@ function validateDraft(draft: SettingsDraft, t: Translate): { settings: Preferen
     editorFontSize,
     databaseResultFontSize,
     terminalFont,
-    editorFont
+    editorFont,
+    proxy: proxyValidation.data
   });
   if (!parsed.success) return { settings: null, error: t('设置包含无效值。'), tab: null };
   return { settings: parsed.data, error: null, tab: null };
@@ -294,6 +317,9 @@ export default function SettingsPage({ preferences, update, updateLoadError, onN
     preferences.terminalCursorStyle,
     preferences.terminalFont,
     preferences.terminalLineHeight,
+    preferences.proxy.bypass,
+    preferences.proxy.mode,
+    preferences.proxy.server,
     preferences.theme,
     preferences.shortcuts
   ]);
@@ -423,6 +449,29 @@ export default function SettingsPage({ preferences, update, updateLoadError, onN
                   <div className="settings-theme-preview" style={theme.colors as CSSProperties} aria-hidden="true"><div><i /><b /><em /></div><span><strong>JumpServer</strong><small>$ echo ready</small></span></div>
                   <span className="settings-theme-name">{theme.name}</span>{draft.theme === theme.id && <Check size={15} aria-label={t('已选择')} />}
                 </Button>)}
+              </div>
+            </section>}
+
+            {selectedTab === 'network' && <section className="settings-section" aria-labelledby="network-settings-title">
+              <div className="settings-section-heading"><div><h2 id="network-settings-title">{t('网络与代理')}</h2><p>{t('为应用的 HTTP、HTTPS 和 WebSocket 连接选择代理路由。')}</p></div></div>
+              <div className="settings-stack">
+                <fieldset className="settings-proxy-mode">
+                  <legend>{t('代理模式')}</legend>
+                  <RadioGroup aria-describedby="settings-proxy-mode-help" aria-label={t('代理模式')} isDisabled={pending} value={draft.proxy.mode} onChange={(mode) => {
+                    if (mode === 'system' || mode === 'direct' || mode === 'custom') updateDraft({ proxy: { ...draft.proxy, mode } });
+                  }}>
+                    <Radio value="system"><Radio.Content className={draft.proxy.mode === 'system' ? 'settings-proxy-option is-selected' : 'settings-proxy-option'}><span className="settings-proxy-option-copy"><strong>{t('使用系统代理')}</strong><small>{t('使用操作系统当前的代理设置（默认）。')}</small></span><Radio.Control /></Radio.Content></Radio>
+                    <Radio value="direct"><Radio.Content className={draft.proxy.mode === 'direct' ? 'settings-proxy-option is-selected' : 'settings-proxy-option'}><span className="settings-proxy-option-copy"><strong>{t('直接连接（禁用代理）')}</strong><small>{t('不通过代理直接连接。')}</small></span><Radio.Control /></Radio.Content></Radio>
+                    <Radio value="custom"><Radio.Content className={draft.proxy.mode === 'custom' ? 'settings-proxy-option is-selected' : 'settings-proxy-option'}><span className="settings-proxy-option-copy"><strong>{t('自定义代理')}</strong><small>{t('使用此设备保存的单个代理地址。')}</small></span><Radio.Control /></Radio.Content></Radio>
+                  </RadioGroup>
+                </fieldset>
+                <p className="settings-proxy-help" id="settings-proxy-mode-help">{t('代理地址和绕过规则会在模式切换时保留；只有“自定义代理”会使用它们。')}</p>
+                <div className="settings-proxy-details">
+                  <label className="settings-field is-wide" htmlFor="settings-proxy-server"><span>{t('自定义代理地址')}</span><Input id="settings-proxy-server" aria-describedby="settings-proxy-server-help" aria-invalid={validation.proxyServerInvalid === true} autoComplete="off" fullWidth disabled={pending} placeholder="http://proxy.example.com:8080" type="text" value={draft.proxy.server} variant="secondary" onChange={(event) => updateDraft({ proxy: { ...draft.proxy, server: event.target.value } })} /><small id="settings-proxy-server-help">{t('例如 http://proxy.example.com:8080 或 socks5://proxy.example.com:1080。仅支持含端口的 HTTP、HTTPS 或 SOCKS5 地址。')}</small></label>
+                  <label className="settings-field is-wide" htmlFor="settings-proxy-bypass"><span>{t('不使用代理的地址')}</span><Input id="settings-proxy-bypass" aria-describedby="settings-proxy-bypass-help" aria-invalid={validation.proxyBypassInvalid === true} autoComplete="off" fullWidth disabled={pending} placeholder="localhost, 127.0.0.1, *.internal.example.com" type="text" value={draft.proxy.bypass} variant="secondary" onChange={(event) => updateDraft({ proxy: { ...draft.proxy, bypass: event.target.value } })} /><small id="settings-proxy-bypass-help">{t('可选，使用逗号分隔的 Chromium 绕过规则。例如 localhost、127.0.0.1、*.internal.example.com。')}</small></label>
+                </div>
+                <p className="settings-proxy-note">{t('代理地址不支持账号或密码，应用不会保存代理凭据。')}</p>
+                <p className="settings-proxy-note">{t('保存后会立即用于后续登录和新建连接；现有连接需重新连接。系统浏览器以及原生 SSH/SFTP 连接不受影响。')}</p>
               </div>
             </section>}
 

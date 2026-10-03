@@ -67,13 +67,14 @@ const ssh = vi.hoisted(() => {
 
 const electron = vi.hoisted(() => ({
   app: { getPath: vi.fn() },
-  session: { fromPartition: vi.fn() },
+  session: { defaultSession: undefined as never, fromPartition: vi.fn() },
   dialog: { showMessageBox: vi.fn() },
   net: { WebSocket: vi.fn() }
 }));
 
 const oauthNetwork = vi.hoisted(() => ({
   fetch: vi.fn(),
+  setProxy: vi.fn(async () => {}),
   closeAllConnections: vi.fn(async () => {}),
   clearStorageData: vi.fn(async () => {}),
   clearCache: vi.fn(async () => {}),
@@ -83,6 +84,7 @@ const oauthNetwork = vi.hoisted(() => ({
 
 const componentNetwork = vi.hoisted(() => ({
   fetch: vi.fn(),
+  setProxy: vi.fn(async () => {}),
   closeAllConnections: vi.fn(async () => {}),
   clearStorageData: vi.fn(async () => {}),
   clearCache: vi.fn(async () => {}),
@@ -281,6 +283,7 @@ beforeEach(async () => {
   userData = await mkdtemp(join(tmpdir(), 'jumpserver-auth-runtime-'));
   electron.app.getPath.mockReturnValue(userData);
   electron.dialog.showMessageBox.mockResolvedValue({ response: 1 });
+  electron.session.defaultSession = oauthNetwork as never;
   electron.session.fromPartition.mockImplementation((partition: string) =>
     partition.includes('component') ? componentNetwork : oauthNetwork
   );
@@ -336,6 +339,22 @@ describe('desktop OAuth authentication lifecycle', () => {
     expect(order).toEqual(['clear', 'revoke']);
     expect(second.emit).toHaveBeenCalledWith({ type: 'identity', identity: null });
   });
+  it('applies the device proxy before restoring OAuth and drains the Core HTTP pool after saving a new route', async () => {
+    vault.record = storedSession();
+    const { runtime } = makeRuntime();
+    await saveSite(runtime);
+
+    const snapshot = await bootstrap(runtime);
+    expect(oauthNetwork.setProxy).toHaveBeenCalledWith({ mode: 'system' });
+    expect(oauthNetwork.setProxy.mock.invocationCallOrder[0]!).toBeLessThan(oauthNetwork.fetch.mock.invocationCallOrder[0]!);
+
+    await runtime.invoke('preferences.save', {
+      preferences: { ...snapshot.preferences, proxy: { mode: 'direct', server: '', bypass: '' } }
+    });
+    expect(oauthNetwork.setProxy).toHaveBeenLastCalledWith({ mode: 'direct' });
+    expect(oauthNetwork.closeAllConnections).toHaveBeenCalled();
+  });
+
 
   it('keeps the active identity and saved credentials when token refresh is temporarily unavailable', async () => {
     vault.record = storedSession();

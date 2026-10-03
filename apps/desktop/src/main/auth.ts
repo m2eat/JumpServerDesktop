@@ -36,6 +36,7 @@ import { HostKeyStore } from './host-key-store';
 import { OAuthAccess, OAuthError, createOAuthAuthorization, discoverOAuth, exchangeOAuthCode, revokeOAuth } from './oauth';
 import type { OAuthAuthorization, OAuthConfiguration, OAuthTokens, OAuthTransport } from './oauth';
 import { OAuthCredentialStore } from './oauth-storage';
+import { ProxySessionManager } from './proxy';
 import type { StoredOAuthSession } from './oauth-storage';
 import type {
   AppEvent,
@@ -252,6 +253,7 @@ export function createAuthRuntime(options: CreateAuthRuntimeOptions): {
   dispose(): Promise<void>;
 } {
   const storage = new AuthStorage(join(app.getPath('userData'), 'jumpserver-desktop.sqlite'));
+  const proxySessions = new ProxySessionManager(session);
   let active: AuthenticatedNetworkState | null = null;
   const credentials = new OAuthCredentialStore(join(app.getPath('userData'), 'credentials', 'oauth-session.bin'));
   const connections = new Set<AuthorizedConnection>();
@@ -268,6 +270,36 @@ export function createAuthRuntime(options: CreateAuthRuntimeOptions): {
   let epoch = 0;
   let authOperation = 0;
   let rejection: { epoch: number; result: Promise<never> } | undefined;
+  let proxyInitialized = false;
+  let proxyOperation: Promise<void> = Promise.resolve();
+  const enqueueProxyOperation = <T>(operation: () => T | Promise<T>): Promise<T> => {
+    const scheduled = proxyOperation.then(operation, operation);
+    proxyOperation = scheduled.then(() => undefined, () => undefined);
+    return scheduled;
+  };
+  const applySavedProxy = (): Promise<void> => enqueueProxyOperation(async () => {
+    if (proxyInitialized) return;
+    await proxySessions.configure(storage.getPreferences(null).proxy);
+    proxyInitialized = true;
+  });
+  const savePreferences = (preferences: Preferences): Promise<Preferences> => enqueueProxyOperation(async () => {
+    const previous = storage.getPreferences(null).proxy;
+    const proxyChanged = previous.mode !== preferences.proxy.mode ||
+      (previous.mode === 'custom' && (previous.server !== preferences.proxy.server || previous.bypass !== preferences.proxy.bypass));
+    if (!proxyChanged) return storage.savePreferences(active?.identity ?? null, preferences);
+
+    proxyInitialized = false;
+    await proxySessions.configure(preferences.proxy);
+    try {
+      const saved = storage.savePreferences(active?.identity ?? null, preferences);
+      proxyInitialized = true;
+      return saved;
+    } catch (cause) {
+      await proxySessions.configure(previous);
+      proxyInitialized = true;
+      throw cause;
+    }
+  });
   const assertOperation = (expected: number): void => {
     if (authOperation !== expected) throw new OAuthError('cancelled', '登录操作已取消');
   };
@@ -285,6 +317,7 @@ export function createAuthRuntime(options: CreateAuthRuntimeOptions): {
 
   const clearNetworkState = async (): Promise<void> => {
     const staleSession = active?.networkSession;
+    if (staleSession) proxySessions.release(staleSession);
     lifecycle.abort();
     lifecycle = new AbortController();
     epoch += 1;
@@ -308,7 +341,10 @@ export function createAuthRuntime(options: CreateAuthRuntimeOptions): {
   };
 
   const transportFor = (network: ElectronSession): OAuthTransport =>
-    (url, init) => network.fetch(url, init);
+    async (url, init) => {
+      await proxySessions.ready();
+      return network.fetch(url, init);
+    };
 
   const forgetRejectedSession = (state: AuthenticatedNetworkState): Promise<never> => {
     if (rejection?.epoch === state.epoch) return rejection.result;
@@ -363,8 +399,9 @@ export function createAuthRuntime(options: CreateAuthRuntimeOptions): {
     if (request.body !== undefined) headers['Content-Type'] = 'application/json';
     const token = await accessTokenFor(state);
     const fetchWithToken = async (bearer: string): Promise<Response> => {
-      assertCurrentEpoch(state.epoch);
       try {
+        await proxySessions.ready();
+        assertCurrentEpoch(state.epoch);
         return await state.networkSession.fetch(url.toString(), {
           method,
           headers: { ...headers, Authorization: `Bearer ${bearer}` },
@@ -604,10 +641,13 @@ export function createAuthRuntime(options: CreateAuthRuntimeOptions): {
         throw new Error('未授权连接此 Chen 组件入口');
       }
     }
+    const network = await proxySessions.createComponentSession(`memory:jumpserver-component-${randomUUID()}`);
+    assertCurrentEpoch(requestEpoch);
     const connection = createComponentConnection({
       endpointUrl,
       tokenId: token.tokenId,
       orgId: context.orgId,
+      network,
       assertCurrent: () => assertCurrentEpoch(requestEpoch),
       onClose: (value) => connections.delete(value)
     });
@@ -874,11 +914,14 @@ export function createAuthRuntime(options: CreateAuthRuntimeOptions): {
     }
     rememberedSiteId = site.id;
     const expectedEpoch = epoch;
-    const network = session.fromPartition(`memory:jumpserver-oauth-${randomUUID()}`, { cache: false });
+    const network = await proxySessions.createSession(`memory:jumpserver-oauth-${randomUUID()}`);
     try {
       return await establishIdentity(site, network, saved.configuration, saved.tokens, expectedEpoch, saved.identity);
     } catch (cause) {
-      if (active?.networkSession !== network) await network.closeAllConnections();
+      if (active?.networkSession !== network) {
+        proxySessions.release(network);
+        await network.closeAllConnections();
+      }
       throw cause;
     }
   };
@@ -930,7 +973,7 @@ export function createAuthRuntime(options: CreateAuthRuntimeOptions): {
     assertOperation(operation);
     const expectedEpoch = epoch;
     const signal = lifecycle.signal;
-    const network = session.fromPartition(`memory:jumpserver-oauth-${randomUUID()}`, { cache: false });
+    const network = await proxySessions.createSession(`memory:jumpserver-oauth-${randomUUID()}`);
     const transport = transportFor(network);
     try {
       const configuration = await discoverOAuth(site.url, transport, signal);
@@ -942,7 +985,10 @@ export function createAuthRuntime(options: CreateAuthRuntimeOptions): {
       assertCurrentEpoch(expectedEpoch);
       return await establishIdentity(site, network, configuration, tokens, expectedEpoch);
     } finally {
-      if (active?.networkSession !== network) await network.closeAllConnections();
+      if (active?.networkSession !== network) {
+        proxySessions.release(network);
+        await network.closeAllConnections();
+      }
     }
   };
 
@@ -971,6 +1017,7 @@ export function createAuthRuntime(options: CreateAuthRuntimeOptions): {
     const parsedCommand = runtimeCommandSchema.parse(command);
     if (parsedCommand === 'app.bootstrap') {
       emptyArgsSchema.parse(args);
+      await applySavedProxy();
       await restoreOnStartup();
       const identity = active?.identity ?? null;
       const preferences = storage.getPreferences(identity);
@@ -1003,8 +1050,12 @@ export function createAuthRuntime(options: CreateAuthRuntimeOptions): {
       const { siteId } = authLoginArgsSchema.parse(args);
       if (loginInFlight) throw new Error('已有登录流程正在进行，请先完成或取消浏览器授权');
       loginInFlight = true;
+      const operation = ++authOperation;
       try {
-        return await login(siteId, ++authOperation);
+        await applySavedProxy();
+        await proxyOperation;
+        assertOperation(operation);
+        return await login(siteId, operation);
       } finally {
         loginInFlight = false;
       }
@@ -1107,7 +1158,7 @@ export function createAuthRuntime(options: CreateAuthRuntimeOptions): {
     }
     if (parsedCommand === 'preferences.save') {
       const payload = z.object({ preferences: preferencesSchema }).strict().parse(args);
-      return storage.savePreferences(active?.identity ?? null, payload.preferences);
+      return savePreferences(payload.preferences);
     }
     throw new Error(`认证运行时不处理命令：${parsedCommand}`);
   };

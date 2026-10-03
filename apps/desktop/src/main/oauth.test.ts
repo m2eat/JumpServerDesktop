@@ -48,6 +48,27 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
 }
 
 describe('OAuth Authorization Code + PKCE', () => {
+  it('exposes the Electron network failure without leaking request details', async () => {
+    const transport: OAuthTransport = async () => {
+      throw new Error('net::ERR_CONNECTION_CLOSED at https://jump.example/token?code=secret-code');
+    };
+
+    await expect(discoverOAuth('https://jump.example', transport)).rejects.toMatchObject({
+      kind: 'network',
+      message: expect.stringContaining('net::ERR_CONNECTION_CLOSED')
+    });
+    await expect(discoverOAuth('https://jump.example', transport)).rejects.not.toThrow('secret-code');
+  });
+
+  it('does not expose arbitrary transport exception text', async () => {
+    await expect(discoverOAuth('https://jump.example', async () => {
+      throw new Error('request failed with refresh_token=secret-token');
+    })).rejects.toMatchObject({
+      kind: 'network',
+      message: expect.not.stringContaining('secret-token')
+    });
+  });
+
   it('discovers only exact Core routes and restores the configured gateway prefix', async () => {
     const transport = vi.fn(async () => json(metadata()));
 

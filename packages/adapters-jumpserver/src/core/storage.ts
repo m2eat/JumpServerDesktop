@@ -26,6 +26,7 @@ const preferenceRowSchema = z
 const storedDeviceSettingsSchema = preferenceSettingsSchema.extend({
   autoCheckUpdates: preferenceSettingsSchema.shape.autoCheckUpdates.default(true),
   autoDownloadUpdates: preferenceSettingsSchema.shape.autoDownloadUpdates.default(false),
+  proxy: preferenceSettingsSchema.shape.proxy.default(() => ({ mode: 'system' as const, server: '', bypass: '' })),
   shortcuts: preferenceSettingsSchema.shape.shortcuts.default(defaultShortcutPreferences)
 });
 
