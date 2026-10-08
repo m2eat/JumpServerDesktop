@@ -164,6 +164,7 @@ export interface Commands {
   'app.openRelease': { args: Record<string, never>; result: void };
   'app.edit': { args: { action: 'copy' | 'cut' | 'paste' | 'selectAll' | 'undo' | 'redo' }; result: void };
   'app.quit': { args: Record<string, never>; result: void };
+  'app.titlebar': { args: { color: string; symbolColor: string }; result: void };
 
   'app.bootstrap': { args: Record<string, never>; result: Snapshot };
   'site.save': { args: { id?: string; name: string; url: string }; result: Site };

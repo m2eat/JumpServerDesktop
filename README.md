@@ -127,6 +127,15 @@ SFTP 文件会话检测到 SSH／SFTP 通道断开或请求返回连接丢失时
 
 **English:** Choose System, Direct, or Custom under **Settings → Network**. Settings persist on this device and are available before login. Custom HTTP/HTTPS/SOCKS5 proxies require an explicit port and cannot contain credentials; optional bypass rules are comma-separated. Saved changes apply to subsequent login/API requests and new Chen connections without restarting. Reconnect existing Chen sessions to change their route. Native SSH/SFTP and the system browser are unaffected. An unavailable custom proxy never silently falls back to direct access.
 
+## 窗口与外观
+
+- 三个平台都将窗口控制与顶部标签栏放在同一行。macOS 保留左侧红黄绿按钮；Windows／Linux 隐藏独立系统标题栏，使用 Electron 原生窗口按钮覆盖层，不以网页按钮替代最小化、最大化／还原和关闭。
+- Windows／Linux 的按钮区域随应用主题配色，并按系统报告的位置为标签和工具按钮留出空间，兼容 Linux 将窗口按钮放在左侧的布局。选择“跟随系统”时，窗口按钮配色也会随深浅色切换。
+- 顶部空白区域可拖动窗口，加载中或初始化失败时也保留顶部拖动区域。关闭窗口仍经过未保存编辑、活动连接和传输任务的原有确认流程。
+- Windows／Linux 默认自动隐藏应用菜单栏，可按 `Alt` 显示菜单。
+
+**English:** The tab strip shares a single row with native window controls on all platforms. macOS keeps its traffic lights; Windows/Linux use Electron's window-controls overlay, matching the application theme and reserving space on either side according to the desktop layout. The empty top strip remains draggable, including during startup or initialization errors. Existing close confirmations remain in place. On Windows/Linux, press `Alt` to reveal the auto-hidden application menu.
+
 ## 键盘快捷键
 
 设置按「外观、网络、终端、数据库、编辑器、快捷键、关于与更新、站点」分类显示。标签栏和保存按钮保持可见，只有当前类别内容滚动；切换标签保留所有未保存修改，**保存并应用**统一保存各类别草稿。快捷键入口和更新入口直接打开对应标签。

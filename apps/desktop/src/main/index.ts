@@ -28,6 +28,7 @@ const commands: Readonly<Record<CommandName, true>> = {
   'app.openRelease': true,
   'app.edit': true,
   'app.quit': true,
+  'app.titlebar': true,
   'site.save': true,
   'site.remove': true,
   'auth.login': true,
@@ -102,7 +103,19 @@ async function createWindow(): Promise<void> {
   await setNativeLanguage('system', app.getLocale());
   const icon = join(app.isPackaged ? process.resourcesPath : app.getAppPath() + '/build', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
   if (!app.isPackaged && process.platform === 'darwin') app.dock?.setIcon(icon);
-  const window = new BrowserWindow({ icon, width: 1440, height: 900, minWidth: 1024, minHeight: 680, show: false, backgroundColor: '#1e2031', title: 'JumpServer Desktop', titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default', ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 14, y: 21 } } : {}), webPreferences: { preload: join(import.meta.dirname, '../preload/index.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, spellcheck: false } });
+  const window = new BrowserWindow({
+    icon, width: 1440, height: 900, minWidth: 1024, minHeight: 680, show: false,
+    backgroundColor: '#1e2031', title: 'JumpServer Desktop',
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
+    ...(process.platform === 'darwin'
+      ? { trafficLightPosition: { x: 14, y: 21 } }
+      : {
+          autoHideMenuBar: true,
+          // Match the 58px tab strip, leaving its bottom border visible.
+          titleBarOverlay: { color: '#2B2E40', symbolColor: '#F0F0F6', height: 57 }
+        }),
+    webPreferences: { preload: join(import.meta.dirname, '../preload/index.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, spellcheck: false }
+  });
   const localFiles = new LocalFiles();
   let eventPort: MessagePortMain | undefined;
   const registry = new SessionRegistry(
@@ -155,6 +168,14 @@ async function createWindow(): Promise<void> {
   ipcMain.handle('desktop:invoke', async (event, command: unknown, raw: unknown) => {
     if (!trusted(event) || typeof command !== 'string' || !Object.hasOwn(commands, command)) throw new Error('请求来源或命令不受信任');
     if (exitCleanupPending) throw new Error('工作台正在为更新关闭，不能执行新的操作');
+    if (command === 'app.titlebar') {
+      const colors = z.object({
+        color: z.string().regex(/^#[0-9a-f]{6}$/i),
+        symbolColor: z.string().regex(/^#[0-9a-f]{6}$/i)
+      }).strict().parse(raw);
+      if (process.platform !== 'darwin') window.setTitleBarOverlay(colors);
+      return;
+    }
     if (command === 'app.edit') {
       const { action } = z.object({ action: z.enum(['copy', 'cut', 'paste', 'selectAll', 'undo', 'redo']) }).strict().parse(raw);
       window.webContents[action]();

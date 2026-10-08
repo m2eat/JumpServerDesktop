@@ -447,6 +447,13 @@ export default function App() {
 
     toastTimerRef.current.add(timer);
   }, []);
+  useEffect(() => {
+    if (window.desktop.platform === 'darwin') return;
+    void window.desktop.invoke('app.titlebar', {
+      color: theme.colors['--surface-2'],
+      symbolColor: theme.colors['--text']
+    }).catch((error: unknown) => addToast(getErrorMessage(error), 'error'));
+  }, [theme, addToast]);
   const openSettings = useCallback(() => {
     setSidebarView('settings');
     setScreen('library');
